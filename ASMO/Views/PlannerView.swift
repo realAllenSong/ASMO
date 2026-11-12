@@ -441,6 +441,17 @@ struct PlannerView: View {
                 CalendarHost(key: calendarKey) { desktopMonth }
                     .equatable()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // While typing in the bar, a tap anywhere on the calendar puts the keyboard away (and only that).
+                    .overlay {
+                        if barOpen {
+                            theme.ink.opacity(0.04).ignoresSafeArea()
+                                .onTapGesture { closeBar() }
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.smooth(duration: 0.2), value: barOpen)
+                    // The bar sits in the safe area, so the keyboard lifts it instead of covering it.
+                    .safeAreaInset(edge: .bottom, spacing: 0) { bottomControls }
                     .background(theme.paper.ignoresSafeArea())
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationDestination(item: $editingDay) { day in
@@ -473,7 +484,9 @@ struct PlannerView: View {
         }
         .background(theme.paper.ignoresSafeArea())
         .foregroundStyle(theme.ink)
+        #if os(macOS)
         .overlay(alignment: .bottom) { bottomControls }
+        #endif
         .onChange(of: documentOrganizing) { _, busy in if !busy { voiceOrganizing = false } }
         .sheet(item: $editingRoutine) { routine in
             RoutineEditor(routine: routine, theme: theme,
@@ -2165,6 +2178,12 @@ struct PlannerView: View {
 
     private var desktopMonth: some View {
         let calendar = clock.calendar
+        #if os(iOS)
+        // iPhone: months in one continuous vertical scroll (Apple Calendar), each built when it scrolls into view.
+        return PhoneMonthScroller(start: monthCursor, jump: 0, today: clock.today, theme: theme, calendar: calendar,
+                                  items: { desktopCalendarItems($0, calendar: calendar) },
+                                  openDay: { openDocument($0) }, settings: { sheet = .settings })
+        #else
         let month = CalendarMonth(containing: monthCursor, calendar: calendar)
         let visible = Set(month.days)
         let anchors = Dictionary(tasks.lazy.compactMap { task -> (UUID, Date)? in
@@ -2192,6 +2211,7 @@ struct PlannerView: View {
                 let result = await system.agendaEvents(on: month.days, calendar: calendar, linkedAnchors: anchors)
                 if !Task.isCancelled { monthEvents = result }
             }
+        #endif
     }
 
     private func shiftDesktopMonth(_ offset: Int) {
@@ -2993,6 +3013,14 @@ struct PlannerView: View {
         #endif
         if commitDictation(text, defaultDay: clock.today) != nil { barText = "" }
     }
+
+    #if os(iOS)
+    /// Puts the keyboard away and folds the bar back (what was typed stays as a draft).
+    private func closeBar() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { barOpen = false }
+    }
+    #endif
 
     /// Hands what was typed or said to the on-device assistant; everything it changed can be undone in one tap.
     /// If it can't help (unavailable, or it fails), the rules file the text as before.
