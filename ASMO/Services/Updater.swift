@@ -37,6 +37,8 @@ final class Updater {
             try? await Task.sleep(for: .seconds(8))
             while !Task.isCancelled {
                 await check()
+                // Test runs only (`--args -asmoInstallUpdate YES`): install without the prompt.
+                if available != nil, UserDefaults.standard.bool(forKey: "asmoInstallUpdate") { install() }
                 try? await Task.sleep(for: .seconds(24 * 3600))
             }
         }
@@ -133,6 +135,7 @@ final class Updater {
             [ -e \(quote(target.path)) ] || /bin/mv \(quote(old)) \(quote(target.path))
         fi
         /usr/bin/xattr -dr com.apple.quarantine \(quote(target.path)) 2>/dev/null
+        /bin/rm -rf \(quote(fresh.deletingLastPathComponent().path))
         /usr/bin/open \(quote(target.path))
         """
         let process = Process()
