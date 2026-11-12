@@ -1,7 +1,10 @@
 #if os(macOS)
 import AppKit
+#endif
 import Foundation
 import SwiftData
+
+#if os(macOS)
 
 /// The door for coding agents: the `asmo` command (see CLI/) connects to a socket in the app's container, sends one
 /// JSON request and reads one JSON answer. The app stays the only writer of the store, so open windows update live.
@@ -77,7 +80,10 @@ enum AgentBridge {
     }
 }
 
-/// What an agent can ask for. Requests and answers are JSON objects; every answer has "ok".
+#endif
+
+/// What an agent can ask for. Requests and answers are JSON objects; every answer has "ok". The same commands serve
+/// the `asmo` command on the Mac and the Apple Intelligence assistant on iPhone (pages are Mac-only for now).
 @MainActor
 final class AgentCommands {
     struct Failure: Error { let message: String }
@@ -123,14 +129,28 @@ final class AgentCommands {
             answer["ok"] = true
         } catch {
             context.rollback()
-            answer = ["ok": false, "error": (error as? Failure)?.message ?? (error as? PageMarkdown.Failure)?.message ?? error.localizedDescription]
+            answer = ["ok": false, "error": Self.message(error)]
         }
         return (try? JSONSerialization.data(withJSONObject: answer, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data("{\"ok\":false}".utf8)
     }
 
+    private static func message(_ error: Error) -> String {
+        if let failure = error as? Failure { return failure.message }
+        #if os(macOS)
+        if let failure = error as? PageMarkdown.Failure { return failure.message }
+        #endif
+        return error.localizedDescription
+    }
+
     private func handle(_ command: String, _ body: [String: Any]) async throws -> [String: Any] {
         switch command {
-        case "ping": return ["app": AppName.display, "today": clock.today.key, "store": AgentBridge.socketName == "asmo.sock" ? "real" : "test"]
+        case "ping":
+            #if os(macOS)
+            let store = AgentBridge.socketName == "asmo.sock" ? "real" : "test"
+            #else
+            let store = "real"
+            #endif
+            return ["app": AppName.display, "today": clock.today.key, "store": store]
         case "day": return try day(body)
         case "list": return try list(body)
         case "search": return try search(body)
@@ -142,11 +162,13 @@ final class AgentCommands {
         case "routine-add": return try addRoutine(body)
         case "routine-stop": return try stopRoutine(body)
         case "routine-mark": return try markRoutine(body)
+        #if os(macOS)
         case "show": return try show(body)
         case "page": return try page(body)
         case "page-write": return try await writePage(body)
         case "page-set": return try await setBlock(body)
         case "page-remove": return try removeBlocks(body)
+        #endif
         case "dates": return ["dates": try dates().map(json)]
         case "date-add": return try addDate(body)
         case "date-remove": return try removeDate(body)
@@ -176,12 +198,14 @@ final class AgentCommands {
             return row
         }
         var answer: [String: Any] = ["day": day.key, "weekday": weekday(day), "tasks": top.map { tree($0, in: all) }, "routines": daily]
+        #if os(macOS)
         let key = day.key
         if let page = try context.fetch(FetchDescriptor<DayPage>(predicate: #Predicate { $0.dayKey == key })).first,
            let data = page.rtfd, let text = NSAttributedString(rtfd: data, documentAttributes: nil) {
             let written = PageMarkdown.markdown(text)
             if !written.isEmpty { answer["page"] = written }
         }
+        #endif
         let occasions = try dates().filter { $0.rule.matches(day, calendar: clock.calendar) }
         if !occasions.isEmpty { answer["dates"] = occasions.map(json) }
         let month = PlanDate(year: day.year, month: day.month)
@@ -220,7 +244,12 @@ final class AgentCommands {
             guard depth < 3 else { throw Failure(message: "Subtasks go three levels deep at most.") }
             var schedule = try item["day"].map(planDay) ?? parent?.schedule?.dayOnly ?? fallback
             let task = TaskRecord(title: title, note: item["note"] as? String ?? "", schedule: schedule)
-            try setTime(task, from: item["time"].flatMap(minutes), to: item["end"].flatMap(minutes), schedule: &schedule)
+            if let words = spoken(item["when"], around: schedule) {
+                schedule = words.day
+                try setTime(task, from: words.start, to: words.end, schedule: &schedule)
+            } else {
+                try setTime(task, from: item["time"].flatMap(minutes), to: item["end"].flatMap(minutes), schedule: &schedule)
+            }
             task.completed = item["done"] as? Bool ?? false
             task.parentID = parent?.id
             // Keeps the order they were given in (items are listed by creation time).
@@ -253,7 +282,15 @@ final class AgentCommands {
         }
         if let note = body["note"] as? String { task.note = note }
         if let done = body["done"] as? Bool { task.completed = done }
-        if let day = body["day"] {
+        if let words = spoken(body["when"], around: task.schedule?.dayOnly ?? clock.today) {
+            var schedule = words.day
+            for child in try family(of: task).dropFirst() {
+                child.schedule = PlanDate(year: schedule.year, month: schedule.month, day: schedule.day, hour: child.hour, minute: child.minute)
+            }
+            task.carriedFrom = nil
+            if let start = words.start { try setTime(task, from: start, to: words.end, schedule: &schedule) }
+            else { schedule.hour = task.schedule?.hour; schedule.minute = task.schedule?.minute; task.schedule = schedule }
+        } else if let day = body["day"] {
             let target = try planDay(day)
             let old = task.schedule
             task.schedule = PlanDate(year: target.year, month: target.month, day: target.day,
@@ -366,6 +403,7 @@ final class AgentCommands {
         return ["routine": routine.id.uuidString.lowercased(), "day": key, "state": state]
     }
 
+    #if os(macOS)
     // MARK: The window
 
     /// Brings the app's window to a month (only when asked: agents normally work in the background).
@@ -483,6 +521,8 @@ final class AgentCommands {
         return ["day": key, "blocks": blockRows(text)]
     }
 
+    #endif
+
     // MARK: Important dates
 
     private func dates() throws -> [ImportantDateRecord] {
@@ -569,6 +609,21 @@ final class AgentCommands {
 
     private func summary(_ titles: [String]) -> String {
         titles.count == 1 ? "「\(titles[0])」" : "\(titles.count) items (「\(titles[0])」…)"
+    }
+
+    /// For the in-app assistant: one request as a JSON string in, the JSON answer out.
+    func perform(_ request: [String: Any]) async -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: request)) ?? Data()
+        return String(decoding: await runInTurn(data), as: UTF8.self)
+    }
+
+    /// How many changes can be taken back now (to undo exactly what one assistant reply did).
+    var undoDepth: Int { undos.count }
+
+    /// Takes back changes until only `depth` remain.
+    func undo(to depth: Int) {
+        while undos.count > depth, let last = undos.popLast() { try? last.revert() }
+        try? context.save()
     }
 
     /// Takes back the last change made through `asmo`.
@@ -664,6 +719,15 @@ final class AgentCommands {
         return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][clock.calendar.component(.weekday, from: date) - 1]
     }
 
+    /// The person's own words for when ("明天下午三点到四点", "next Friday 9am"), read by the date rules the app uses
+    /// for typing, so an assistant never has to work out dates itself. Nil when there are none or they aren't a date.
+    private func spoken(_ value: Any?, around day: PlanDate) -> (day: PlanDate, start: Int?, end: Int?)? {
+        guard let words = (value as? String)?.trimmed, !words.isEmpty,
+              let (plan, end) = CaptureParser.explicitSchedule(words, clock: clock, selectedDay: day) else { return nil }
+        let date = plan.day == nil ? PlanDate(year: plan.year, month: plan.month) : plan.dayOnly
+        return (date, plan.minuteOfDay, plan.minuteOfDay == nil ? nil : end)
+    }
+
     /// "HH:MM" → minutes; null or "" → nil (no time).
     private func minutes(_ value: Any) throws -> Int? {
         if value is NSNull { return nil }
@@ -696,6 +760,10 @@ final class AgentCommands {
             if plan.date(in: clock.calendar) != nil { return plan }
         }
         if parts.count == 2, let year = parts[0], let month = parts[1], (1...12).contains(month) { return PlanDate(year: year, month: month) }
+        // Words for a day ("明天", "下周五", "next Friday"), read by the date rules.
+        if let (plan, _) = CaptureParser.explicitSchedule(raw.trimmed, clock: clock, selectedDay: clock.today) {
+            return plan.day == nil ? PlanDate(year: plan.year, month: plan.month) : plan.dayOnly
+        }
         throw Failure(message: "\"\(raw)\" is not a day (YYYY-MM-DD, YYYY-MM, today, tomorrow, +N).")
     }
 
@@ -721,4 +789,3 @@ final class AgentCommands {
         }
     }
 }
-#endif

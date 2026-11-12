@@ -189,6 +189,9 @@ struct PlannerView: View {
     /// The page's microphone: transcribing what was said, then organizing it (shown in the status pill).
     @State private var pageTranscribing = false
     @State private var voiceOrganizing = false
+    /// The Apple Intelligence assistant (iPhone) is working on what was typed or said.
+    @State private var assistantWorking = false
+    @State private var assistantCommands: AgentCommands?
     /// Something said or typed in the bar is being organized by the model.
     /// Debug builds: "pill:listening|transcribing|organizing|off" shows the voice pill without a microphone.
     @State private var debugVoicePhase: VoicePhase?
@@ -276,7 +279,7 @@ struct PlannerView: View {
         if let debugVoicePhase { return debugVoicePhase }
         if pageController.recording { return .listening }
         if pageTranscribing { return .transcribing }
-        if voiceOrganizing && documentOrganizing { return .organizing }
+        if (voiceOrganizing && documentOrganizing) || assistantWorking { return .organizing }
         return nil
     }
 
@@ -2961,7 +2964,35 @@ struct PlannerView: View {
     private func submitBar() {
         guard !barRecording, !barTranscribing, !barText.trimmed.isEmpty else { return }
         let text = barText
+        #if os(iOS)
+        // With Apple Intelligence, the assistant reads it (commands like "删掉看房" still go straight to the rules).
+        if PhoneAssistant.isAvailable && barCommand == nil {
+            barText = ""
+            Task { await askAssistant(text) }
+            return
+        }
+        #endif
         if commitDictation(text, defaultDay: clock.today) != nil { barText = "" }
+    }
+
+    /// Hands what was typed or said to the on-device assistant; everything it changed can be undone in one tap.
+    /// If it can't help (unavailable, or it fails), the rules file the text as before.
+    private func askAssistant(_ text: String) async {
+        let commands = assistantCommands ?? AgentCommands(context: context)
+        assistantCommands = commands
+        assistantWorking = true
+        defer { assistantWorking = false }
+        do {
+            let (summary, depth) = try await PhoneAssistant.handle(text, commands: commands)
+            if commands.undoDepth > depth {
+                announce(summary.isEmpty ? String(localized: "已记下") : summary) { commands.undo(to: depth) }
+            } else if !summary.isEmpty {
+                // Nothing changed (a question, say): its answer is the reply.
+                announce(summary)
+            }
+        } catch {
+            _ = commitDictation(text, defaultDay: clock.today)
+        }
     }
 
     /// Adds plain text to the end of a day's page.
