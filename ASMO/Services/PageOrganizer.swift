@@ -251,7 +251,7 @@ final class PageOrganizer {
 
     #if DEBUG
     static func debugLog(_ text: String) {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-judge.log")
+        let url = AppPaths.caches.appendingPathComponent("asmo-judge.log")
         let line = "[\(Date.now.formatted(date: .omitted, time: .standard))] " + text + "\n"
         if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
         else { try? Data(line.utf8).write(to: url) }

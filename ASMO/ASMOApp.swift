@@ -13,14 +13,27 @@ struct ASMOApp: App {
     init() {
         // 纸面 (the paper look) became the design on 2026-11-08: switch to it once; Settings can change it back.
         let defaults = UserDefaults.standard
+        #if os(macOS)
+        // First launch outside the sandbox: bring the settings along; reopen at once if the language changed.
+        if AppPaths.moveSettingsOutOfSandbox(defaults) {
+            defaults.synchronize()
+            let reopen = Process()
+            reopen.executableURL = URL(fileURLWithPath: "/bin/bash")
+            reopen.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.1; done; /usr/bin/open '\(Bundle.main.bundlePath)'"]
+            try? reopen.run()
+            exit(0)
+        }
+        #endif
         AppLanguage.keepChineseForEarlierUsers(defaults)
         if !defaults.bool(forKey: "paperLookApplied") {
             defaults.set(DesktopAppearance.light.rawValue, forKey: "desktopAppearance")
             defaults.set(true, forKey: "paperLookApplied")
         }
         #if os(macOS)
-        // Coding agents reach the app through the `asmo` command.
+        // Coding agents reach the app through the `asmo` command, set up for them without any typing.
         if case .success(let container) = storage { AgentBridge.start(container) }
+        Task.detached(priority: .utility) { AgentSetup.run() }
+        Updater.shared.checkInBackground()
         #endif
     }
 
@@ -33,6 +46,7 @@ struct ASMOApp: App {
                     .preferredColorScheme(appearance.scheme)
                     #if os(macOS)
                     .frame(minWidth: 720, minHeight: 540)
+                    .modifier(UpdatePrompt())
                     #endif
             case .failure(let error):
                 ContentUnavailableView("无法打开待办", systemImage: "externaldrive.badge.exclamationmark",

@@ -51,7 +51,7 @@ final class DesktopDelegate: NSObject, NSApplicationDelegate {
     private var snapshotTimer: Timer?
 
     private func watchSnapshotRequests() {
-        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let folder = AppPaths.caches
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             let voiceTest = folder.appendingPathComponent("asmo-voice-test.aiff")
             if FileManager.default.fileExists(atPath: voiceTest.path) {

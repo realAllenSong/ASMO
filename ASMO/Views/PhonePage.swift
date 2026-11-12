@@ -117,7 +117,7 @@ struct PhonePageEditor: View {
 enum PhoneDebugHooks {
     @MainActor
     static func watch() async {
-        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let folder = AppPaths.caches
         while !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(400))
             for (name, notification) in [("asmo-type.txt", Notification.Name.asmoDebugType), ("asmo-nav.txt", .asmoDebugNav)] {

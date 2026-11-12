@@ -1,8 +1,8 @@
 PRODUCT_NAME = ASMO
 PRODUCT_BUNDLE_IDENTIFIER = com.realallensong.asmo
-MARKETING_VERSION = 1.0
+MARKETING_VERSION = 1.1
 CURRENT_PROJECT_VERSION = 1
-CURRENT_PROJECT_VERSION[sdk=macosx*] = 3
+CURRENT_PROJECT_VERSION[sdk=macosx*] = 4
 SUPPORTED_PLATFORMS = macosx iphoneos iphonesimulator
 SDKROOT = auto
 ALWAYS_SEARCH_USER_PATHS = NO
@@ -18,6 +18,7 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*] = MacAppIcon
 ASMO_CLOUD_CONTAINER =
 CODE_SIGN_ENTITLEMENTS = Config/ASMO.Local.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = Config/ASMO.Mac.entitlements
 #include? "Personal.xcconfig"
 SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Debug] = $(inherited) DEBUG
 // Built for Apple silicon only.

@@ -51,21 +51,22 @@
 - **`asmo` 命令：** 以上全部都可以从命令行完成，返回 JSON。agent 操作时，打开的窗口会实时更新。
 - **Markdown 页面：** agent 用 Markdown 写笔记：标题、强调、链接、列表、勾选框、引用、表格、代码块、图片（本地路径或网址），以及 mermaid 图表，由 app 自带的 mermaid 绘制。
 - **撤销：** `asmo undo` 撤回 agent 的上一次修改，可以连续撤回，直到 app 重启为止。
+- **自动更新：** 新版本点一下就装好：逐日检查 GitHub Releases，并原地替换自己。
 - **中文和英文：** 界面跟随系统，也可以在设置里选语言。你写的内容不会被翻译。
-- **隐私：** 数据是 app 沙盒里的一个本地文件。不上传任何内容，也没有账号。
+- **隐私：** 数据是你 Mac 上的一个本地文件。不上传任何内容，也没有账号。
 
 ## 安装
 
 要求：Apple 芯片的 Mac，macOS 15 及以上。
 
 1. 从 [Releases](https://github.com/realAllenSong/ASMO/releases/latest) 下载 `ASMO-v….zip`，解压后把 **逐日** 拖进「应用程序」。它用 Developer ID 签名，并经过 Apple 公证。
-2. 打开一次，然后在终端里装好命令：
+2. 打开它。就这样。
 
-   ```bash
-   /Applications/ASMO.app/Contents/Helpers/asmo setup
-   ```
+打开时，逐日会自己连好这台 Mac 上的助手：把 `asmo` 命令放到 `~/.local/bin`，给 Claude Code 和 Codex 装上 skill（已安装时），并把 MCP 服务注册到 Claude 桌面版（已安装时；重启一次 Claude 桌面版即可加载）。**设置 ▸ AI 助手** 里能看到哪些已经连上。
 
-   它会把 `asmo` 链接到 `~/.local/bin`（如果这个目录不在 `PATH` 里，请加上），给 Claude Code 和 Codex 装上 skill（已安装时放到 `~/.claude/skills/asmo` 和 `~/.codex/skills/asmo`），并把 MCP 服务注册到 Claude 桌面版（已安装时）。
+## 更新
+
+逐日打开后不久、以及之后每天，会检查一次 GitHub Releases。有新版本时会询问你。**立即更新** 会下载新版本，确认它由同一位开发者签名，替换 app 并重新打开；**稍后** 则下次再问。**设置 ▸ 更新** 里也有 **检查更新**。你的数据保存在 `~/Library/Application Support/ASMO`，更新不会动它。
 
 ### 从源码构建
 
@@ -74,7 +75,7 @@
 ```bash
 git clone https://github.com/realAllenSong/ASMO.git
 cd ASMO
-script/install.sh      # 构建、替换 /Applications/ASMO.app、安装 asmo 并运行 asmo setup
+script/install.sh      # 构建、替换 /Applications/ASMO.app，并装好 asmo、skill 和 MCP 配置
 ```
 
 `script/release.sh` 构建签名并公证的 zip（需要 Developer ID 证书和 notarytool 配置）。iPhone 版可以从同一份源码构建（`script/install-iphone.sh`，需要你自己的 Apple 开发者团队），但 agent 功能目前只在 Mac 上，两端也还不同步。
@@ -142,15 +143,14 @@ asmo attach ~/Desktop/photo.jpg --day today --caption "白板"
 
 ## 工作原理
 
-- app 在自己的沙盒容器里监听一个 Unix socket。`asmo` 发送一条 JSON 请求并打印 JSON 回答；app 没在运行时，会先在后台启动它。
+- app 在 `~/Library/Application Support/ASMO` 里监听一个 Unix socket。`asmo` 发送一条 JSON 请求并打印 JSON 回答；app 没在运行时，会先在后台启动它。
 - 只有 app 写自己的数据，所以不会有东西在它背后被改动，打开的窗口始终是最新的。
 - 页面保存的是编辑器本身产生的那种富文本，所以 agent 写的内容仍然可以手动编辑。图表的源码保存在图片内部，所以页面可以原样读回 Markdown。
-- 第一次从终端运行 `asmo` 时，macOS 可能会询问是否允许这个终端访问其他 app 的数据。请允许：socket 在逐日的容器里。
 - 如果你用自己的 bundle identifier 构建，用 `ASMO_BUNDLE_ID=com.you.asmo` 告诉命令。
 
 ## 隐私
 
-逐日自己不发起网络请求，只有在你粘贴链接时加载预览。页面里用网址引用的图片，由 `asmo` 命令在你的 Mac 上下载。你的 agent 把什么内容发给它的服务商，是你和那个 agent 之间的事；逐日只接收命令。
+逐日自己只发起两种网络请求：向 GitHub Releases 检查更新，以及你粘贴链接时加载预览。页面里用网址引用的图片，由 `asmo` 命令在你的 Mac 上下载。你的 agent 把什么内容发给它的服务商，是你和那个 agent 之间的事；逐日只接收命令。
 
 ## 开发
 

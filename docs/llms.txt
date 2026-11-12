@@ -6,8 +6,10 @@
 
 - Platform: Apple silicon Mac, macOS 15 or later. Signed with a Developer ID and notarized.
 - Price: free, open source, MIT license. No account, no cloud, no subscription.
-- Data: a local file in the app's sandbox; the app is the only writer, and open windows update while an agent works.
-- Agent surface: `asmo today | day | list | search | add | set | done | rm | page | attach | routine | date | undo | mcp | setup`. Answers are JSON.
+- Data: a local file in ~/Library/Application Support/ASMO; the app is the only writer, and open windows update while an agent works.
+- Install: download, unzip, move to Applications, open. The app sets up the asmo command, the Claude Code / Codex skill and the Claude desktop MCP entry by itself.
+- Updates: checks GitHub Releases after launch and daily; one click downloads, verifies the signature, swaps the app and reopens it.
+- Agent surface: `asmo today | day | list | search | add | set | done | rm | page | attach | routine | date | undo | mcp`. Answers are JSON.
 - Day pages: written in Markdown (headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by path or URL, mermaid diagrams drawn by a bundled copy of mermaid). Read back as blocks b1, b2… that can be replaced or removed one at a time.
 - Undo: `asmo undo` takes back changes made through the command until the app restarts.
 - Interface: English and Chinese; content is never translated.

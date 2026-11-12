@@ -7,6 +7,7 @@ description: Read and change the user's 逐日 (ASMO) planner on this Mac with t
 
 `asmo` talks to the 逐日 (ASMO) app on this Mac. The app starts in the background if it isn't running, and open
 windows update as you work. Answers are JSON. Run `asmo help` for the full list.
+If `asmo` isn't on the PATH, use `/Applications/ASMO.app/Contents/Helpers/asmo`.
 
 You do the thinking; the app stores exactly what you send. Work out dates and times yourself and pass them
 explicitly — nothing is guessed from the title.

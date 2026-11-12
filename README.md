@@ -51,21 +51,22 @@ What makes it different is the `asmo` command. Any agent that can run a shell co
 - **The `asmo` command:** everything above from the command line, with JSON answers. Open windows update while the agent works.
 - **Markdown pages:** agents write notes as Markdown: headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by file path or URL, and mermaid diagrams drawn by a copy of mermaid that ships in the app.
 - **Undo:** `asmo undo` takes back the last change an agent made, and the one before it, until the app is restarted.
+- **Updates itself:** a new version is one click: ASMO checks GitHub Releases and swaps itself in place.
 - **English and Chinese:** the interface follows your Mac, or pick a language in Settings. What you write is never translated.
-- **Private:** your data is a local file in the app's sandbox. Nothing is uploaded and there is nothing to sign in to.
+- **Private:** your data is a local file on your Mac. Nothing is uploaded and there is nothing to sign in to.
 
 ## Install
 
 You need a Mac with Apple silicon and macOS 15 or later.
 
 1. Download `ASMO-v….zip` from [Releases](https://github.com/realAllenSong/ASMO/releases/latest), unzip it and move **ASMO** to Applications. It is signed with a Developer ID and notarized by Apple.
-2. Open it once, then set up the command in Terminal:
+2. Open it. That's all.
 
-   ```bash
-   /Applications/ASMO.app/Contents/Helpers/asmo setup
-   ```
+When it opens, ASMO connects the assistants on your Mac by itself: it puts the `asmo` command in `~/.local/bin`, gives Claude Code and Codex the skill (when they are installed), and registers its MCP server with the Claude desktop app (when it is installed; restart that app once to load it). **Settings ▸ AI assistants** shows what is connected.
 
-   This links `asmo` into `~/.local/bin` (add that folder to your `PATH` if it isn't there), gives Claude Code and Codex the skill (`~/.claude/skills/asmo`, `~/.codex/skills/asmo`, when they are installed), and registers the MCP server with the Claude desktop app (when it is installed).
+## Updates
+
+ASMO checks GitHub Releases shortly after it opens and once a day. When a newer version is out, it asks. **Update Now** downloads it, checks that it is signed by the same developer, replaces the app and reopens it; **Later** asks again next time. **Settings ▸ Updates** has **Check for Updates**. Your data stays in `~/Library/Application Support/ASMO` and is not touched by an update.
 
 ### Build from source
 
@@ -74,7 +75,7 @@ With Xcode 26:
 ```bash
 git clone https://github.com/realAllenSong/ASMO.git
 cd ASMO
-script/install.sh      # builds, replaces /Applications/ASMO.app, installs asmo and runs asmo setup
+script/install.sh      # builds, replaces /Applications/ASMO.app, installs asmo, the skill and the MCP entry
 ```
 
 `script/release.sh` builds the signed, notarized zip (it needs a Developer ID certificate and a notarytool profile). An iPhone app builds from the same source (`script/install-iphone.sh`, with your own Apple developer team), but the agent features are Mac-only for now, and the two do not sync yet.
@@ -142,15 +143,14 @@ asmo attach ~/Desktop/photo.jpg --day today --caption "whiteboard"
 
 ## How it works
 
-- The app listens on a Unix socket inside its own sandbox container. `asmo` sends one JSON request and prints the JSON answer; if the app isn't running, it is started in the background first.
+- The app listens on a Unix socket in `~/Library/Application Support/ASMO`. `asmo` sends one JSON request and prints the JSON answer; if the app isn't running, it is started in the background first.
 - The app is the only writer of its data, so nothing is changed behind its back and open windows stay current.
 - Pages are stored as the same rich text the editor produces, so what an agent writes stays editable by hand. A diagram's source is kept inside its picture, so the page reads back as Markdown.
-- The first time `asmo` runs from a terminal, macOS may ask whether that terminal can access data from other apps. Allow it: the socket lives in ASMO's container.
 - If you build the app under your own bundle identifier, tell the command with `ASMO_BUNDLE_ID=com.you.asmo`.
 
 ## Privacy
 
-ASMO makes no network requests of its own, except to load a preview when you paste a link. Pictures referenced by URL in a page are downloaded by the `asmo` command on your Mac. Whatever your agent sends to its own provider is between you and that agent; ASMO only receives the commands.
+ASMO makes two kinds of network requests of its own: the update check to GitHub Releases, and a preview when you paste a link. Pictures referenced by URL in a page are downloaded by the `asmo` command on your Mac. Whatever your agent sends to its own provider is between you and that agent; ASMO only receives the commands.
 
 ## Development
 

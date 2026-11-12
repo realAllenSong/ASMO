@@ -87,8 +87,12 @@ func connectToApp(_ path: String) -> Int32? {
 
 /// One request, one answer (without its "ok"). Starts the app in the background when it isn't running.
 func send(_ request: [String: Any]) throws -> [String: Any] {
-    let path = NSHomeDirectory() + "/Library/Containers/\(bundleID)/Data/" + (useTestStore ? "asmo-test.sock" : "asmo.sock")
-    var connection = connectToApp(path)
+    let socketName = useTestStore ? "asmo-test.sock" : "asmo.sock"
+    // Since 1.1 the app lives outside the sandbox (Application Support/ASMO); 1.0 kept the socket in its container.
+    let paths = [NSHomeDirectory() + "/Library/Application Support/ASMO/" + socketName,
+                 NSHomeDirectory() + "/Library/Containers/\(bundleID)/Data/" + socketName]
+    func reach() -> Int32? { paths.lazy.compactMap(connectToApp).first }
+    var connection = reach()
     if connection == nil {
         if useTestStore { throw Problem(message: "The test build isn't running. Start it with script/run_test_store.sh.") }
         let open = Process()
@@ -98,7 +102,7 @@ func send(_ request: [String: Any]) throws -> [String: Any] {
         open.waitUntilExit()
         for _ in 0..<50 where connection == nil {
             usleep(200_000)
-            connection = connectToApp(path)
+            connection = reach()
         }
     }
     guard let fd = connection else {

@@ -228,7 +228,15 @@ enum ASMOStore {
         default: break
         }
         #endif
+        #if os(macOS)
+        // Outside the sandbox the store lives in ~/Library/Application Support/ASMO (copied over once from the
+        // sandbox container earlier versions used).
+        AppPaths.moveOutOfSandbox(name)
+        let config = ModelConfiguration(name, schema: schema, url: AppPaths.support.appendingPathComponent(name + ".store"),
+                                        cloudKitDatabase: name == "ASMO" ? cloud : .none)
+        #else
         let config = ModelConfiguration(name, schema: schema, cloudKitDatabase: name == "ASMO" ? cloud : .none)
+        #endif
         return try ModelContainer(for: schema, configurations: [config])
     }
 }

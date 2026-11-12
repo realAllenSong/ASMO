@@ -709,6 +709,22 @@
         }
       }
     },
+    "AI 助手": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI assistants"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 助手"
+          }
+        }
+      }
+    },
     "Apple 提醒事项": {
       "localizations": {
         "en": {
@@ -737,6 +753,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Apple 日历"
+          }
+        }
+      }
+    },
+    "Claude 桌面版（MCP）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude desktop app (MCP)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 桌面版（MCP）"
           }
         }
       }
@@ -1009,6 +1041,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "下划线 ⌘U"
+          }
+        }
+      }
+    },
+    "下载的文件里没有 逐日。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The download doesn't contain ASMO."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载的文件里没有 逐日。"
           }
         }
       }
@@ -2357,6 +2405,22 @@
         }
       }
     },
+    "命令行 asmo": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "asmo command"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令行 asmo"
+          }
+        }
+      }
+    },
     "和 %lld 个子任务": {
       "localizations": {
         "en": {
@@ -3025,6 +3089,22 @@
         }
       }
     },
+    "已经是最新版本。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You're up to date."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已经是最新版本。"
+          }
+        }
+      }
+    },
     "已记下 %lld 件": {
       "localizations": {
         "en": {
@@ -3109,6 +3189,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "已记到 %@"
+          }
+        }
+      }
+    },
+    "已连接": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已连接"
           }
         }
       }
@@ -3253,6 +3349,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "归档后，原文会保存在这里。"
+          }
+        }
+      }
+    },
+    "当前版本 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前版本 %@"
           }
         }
       }
@@ -4013,6 +4125,38 @@
         }
       }
     },
+    "新版本 %@ 可以安装。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@ is ready to install."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新版本 %@ 可以安装。"
+          }
+        }
+      }
+    },
+    "新版本的签名和当前的不一致，已停止更新。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The new version isn't signed by the same developer, so the update stopped."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新版本的签名和当前的不一致，已停止更新。"
+          }
+        }
+      }
+    },
     "新的每日任务": {
       "localizations": {
         "en": {
@@ -4333,6 +4477,22 @@
         }
       }
     },
+    "暂时连不上 GitHub，稍后再试。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't reach GitHub; try again later."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂时连不上 GitHub，稍后再试。"
+          }
+        }
+      }
+    },
     "更多": {
       "localizations": {
         "en": {
@@ -4345,6 +4505,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "更多"
+          }
+        }
+      }
+    },
+    "更新": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新"
           }
         }
       }
@@ -4373,6 +4549,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "更新了 %lld 件已有的"
+          }
+        }
+      }
+    },
+    "更新会下载新版本、替换当前的 逐日 并重新打开。你的数据不受影响。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This downloads the new version, replaces ASMO and reopens it. Your data stays as it is."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新会下载新版本、替换当前的 逐日 并重新打开。你的数据不受影响。"
+          }
+        }
+      }
+    },
+    "更新到 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update to %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新到 %@"
+          }
+        }
+      }
+    },
+    "更新文件没有通过检查。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The update didn't pass the check."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新文件没有通过检查。"
           }
         }
       }
@@ -4425,6 +4649,22 @@
         }
       }
     },
+    "未安装": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not installed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安装"
+          }
+        }
+      }
+    },
     "未完成": {
       "localizations": {
         "en": {
@@ -4469,6 +4709,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "未识别的原文"
+          }
+        }
+      }
+    },
+    "未连接": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not connected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未连接"
           }
         }
       }
@@ -4665,6 +4921,22 @@
         }
       }
     },
+    "检查更新": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for Updates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查更新"
+          }
+        }
+      }
+    },
     "次日结束": {
       "localizations": {
         "en": {
@@ -4677,6 +4949,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "次日结束"
+          }
+        }
+      }
+    },
+    "正在下载新版本…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading the new version…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在下载新版本…"
           }
         }
       }
@@ -4745,6 +5033,22 @@
         }
       }
     },
+    "正在安装，逐日会重新打开。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing; ASMO will reopen."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在安装，逐日会重新打开。"
+          }
+        }
+      }
+    },
     "正在录音，点停止后转写": {
       "localizations": {
         "en": {
@@ -4789,6 +5093,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在整理成待办…"
+          }
+        }
+      }
+    },
+    "正在检查…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查…"
           }
         }
       }
@@ -5349,6 +5669,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "祝福时间"
+          }
+        }
+      }
+    },
+    "稍后": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稍后"
+          }
+        }
+      }
+    },
+    "立即更新": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Now"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即更新"
           }
         }
       }
@@ -6945,6 +7297,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "选时间"
+          }
+        }
+      }
+    },
+    "逐日 %@ 已发布": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ASMO %@ is out"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逐日 %@ 已发布"
+          }
+        }
+      }
+    },
+    "逐日会自动连好装在这台 Mac 上的助手。打开它们，直接说要安排什么。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ASMO connects the assistants installed on this Mac by itself. Open one and say what to plan."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逐日会自动连好装在这台 Mac 上的助手。打开它们，直接说要安排什么。"
           }
         }
       }

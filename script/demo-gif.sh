@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 app="$PWD/DerivedData/mac/Build/Products/Debug/ASMO.app"
-caches="$HOME/Library/Containers/com.realallensong.asmo/Data/Library/Caches"
+caches="$HOME/Library/Caches/com.realallensong.asmo"
 asmo=".build/release/asmo"
 swift build -c release --product asmo > /dev/null
 

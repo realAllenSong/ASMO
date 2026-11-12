@@ -21,7 +21,7 @@ enum AgentBridge {
     static func start(_ container: ModelContainer) {
         guard listener == nil else { return }
         let commands = AgentCommands(context: container.mainContext)
-        let path = NSHomeDirectory() + "/" + socketName
+        let path = AppPaths.support.appendingPathComponent(socketName).path
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return }

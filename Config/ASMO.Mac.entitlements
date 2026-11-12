@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The Mac app is not sandboxed (like ThunderTalk): it sets up the asmo command, the agent skill and the
+	     MCP entry itself, and updates itself from GitHub Releases. With the hardened runtime, reading Apple
+	     Calendar and Reminders still needs this entitlement (and the user's permission). -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+</dict>
+</plist>

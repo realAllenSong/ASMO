@@ -40,7 +40,7 @@ private enum ArchiveIndexCache {
     private static var url: URL {
         // One per store: Debug test runs (ASMO_TEST_STORE) never touch the real one.
         let test = ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] == "1"
-        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return AppPaths.caches
             .appendingPathComponent(test ? "archive-index-test.json" : "archive-index.json")
     }
     /// Read once per launch.
@@ -778,7 +778,7 @@ struct PlannerView: View {
     #if DEBUG
     /// Test driver for the page being written (Debug only): see "ed:" in the nav hooks.
     private func debugEdit(_ command: String) {
-        let out = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-ed.txt")
+        let out = AppPaths.caches.appendingPathComponent("asmo-ed.txt")
         guard let view = pageController.textView, let storage = view.textStorage else {
             try? "no page".write(to: out, atomically: true, encoding: .utf8); return
         }
@@ -2265,13 +2265,13 @@ struct PlannerView: View {
                         else if let other = current.supplementalTarget(forAction: undo, sender: nil) as AnyObject? { target = other }
                         responder = current.nextResponder
                     }
-                    let log = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-tasks.txt")
+                    let log = AppPaths.caches.appendingPathComponent("asmo-tasks.txt")
                     try? "undo target: \(String(describing: target.map { type(of: $0) }))".write(to: log, atomically: true, encoding: .utf8)
                     if let target { NSApp.sendAction(undo, to: target, from: nil) }
                     return
                 }
                 if command == "ping" {
-                    let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-ping.txt")
+                    let url = AppPaths.caches.appendingPathComponent("asmo-ping.txt")
                     try? String(Date.now.timeIntervalSince1970).write(to: url, atomically: true, encoding: .utf8)
                     return
                 }
@@ -2280,7 +2280,7 @@ struct PlannerView: View {
                     let info = "key=\(NSApp.keyWindow != nil) main=\(NSApp.mainWindow != nil) responder=\(String(describing: responder.map { type(of: $0) })) "
                         + "canUndo=\(responder?.undoManager?.canUndo ?? false) action=\(responder?.undoManager?.undoActionName ?? "-") "
                         + "batch=\(OrganizeBatch.last != nil)"
-                    let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-tasks.txt")
+                    let url = AppPaths.caches.appendingPathComponent("asmo-tasks.txt")
                     try? info.write(to: url, atomically: true, encoding: .utf8)
                     return
                 }
@@ -2294,7 +2294,7 @@ struct PlannerView: View {
                         let parent = task.parentID.flatMap { byID[$0]?.title }.map { "  ↳ " + $0 } ?? ""
                         return "\(task.completed ? "[x]" : "[ ]") \(task.schedule?.dayOnly.key ?? "-")\(time) \(task.title)\(parent)"
                     }
-                    let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-tasks.txt")
+                    let url = AppPaths.caches.appendingPathComponent("asmo-tasks.txt")
                     try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
                     return
                 }
@@ -4305,7 +4305,7 @@ enum PerfLog {
         }
     }
     static func say(_ text: String) {
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-perf.txt")
+        let url = AppPaths.caches.appendingPathComponent("asmo-perf.txt")
         let line = String(format: "%.3f ", Date.now.timeIntervalSince1970) + text + "\n"
         if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
         else { try? line.write(to: url, atomically: true, encoding: .utf8) }
@@ -4314,7 +4314,7 @@ enum PerfLog {
     static func note(_ name: String, since start: Date) {
         let ms = Date.now.timeIntervalSince(start) * 1000
         guard ms > 4 else { return }
-        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("asmo-perf.txt")
+        let url = AppPaths.caches.appendingPathComponent("asmo-perf.txt")
         let line = String(format: "%.3f %@ %.1fms\n", Date.now.timeIntervalSince1970, name, ms)
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close()

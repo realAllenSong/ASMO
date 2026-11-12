@@ -256,7 +256,7 @@ MD</pre>
           <div class="card"><h3 data-i18n="ca.c3h">Dates that matter</h3><p data-i18n="ca.c3p">Birthdays, anniversaries and holidays return every year, in the Gregorian or the Chinese lunar calendar.</p></div>
           <div class="card"><h3 data-i18n="ca.c4h">Apple Calendar beside it</h3><p data-i18n="ca.c4p">Optionally show your Apple Calendar events next to your items, read through macOS with your permission.</p></div>
           <div class="card"><h3 data-i18n="ca.c5h">English and Chinese</h3><p data-i18n="ca.c5p">The interface follows your Mac, or pick a language in Settings. What you write stays exactly as you wrote it.</p></div>
-          <div class="card"><h3 data-i18n="ca.c6h">Private by default</h3><p data-i18n="ca.c6p">Your data is a local file in the app's sandbox. No account, no sync service, nothing uploaded.</p></div>
+          <div class="card"><h3 data-i18n="ca.c6h">Private by default</h3><p data-i18n="ca.c6p">Your data is a local file on your Mac. No account, no sync service, nothing uploaded.</p></div>
         </div>
       </div>
     </section>
@@ -264,13 +264,12 @@ MD</pre>
     <section class="sec" id="install">
       <div class="wrap">
         <p class="kicker" data-i18n="in.kicker">Install</p>
-        <h2 data-i18n="in.h2">Two minutes, then just ask.</h2>
+        <h2 data-i18n="in.h2">Download, open, then just ask.</h2>
         <div class="grid">
           <div class="card"><span class="step">1</span><h3 data-i18n="in.s1h">Download</h3><p data-i18n="in.s1p">Get the zip from GitHub Releases, unzip it and move ASMO to Applications. It is signed and notarized by Apple.</p></div>
-          <div class="card"><span class="step">2</span><h3 data-i18n="in.s2h">Set up the command</h3><p data-i18n="in.s2p">Run the line below once. It links asmo into ~/.local/bin, gives Claude Code and Codex the skill, and registers the MCP server.</p></div>
-          <div class="card"><span class="step">3</span><h3 data-i18n="in.s3h">Talk to your agent</h3><p data-i18n="in.s3p">Open a new session and say what your day looks like. macOS may ask once whether your terminal can use ASMO's data: allow it.</p></div>
+          <div class="card"><span class="step">2</span><h3 data-i18n="in.s2h">Open it</h3><p data-i18n="in.s2p">ASMO connects Claude Code, Codex and the Claude desktop app on your Mac by itself. Nothing to type; Settings shows what is connected.</p></div>
+          <div class="card"><span class="step">3</span><h3 data-i18n="in.s3h">Talk to your agent</h3><p data-i18n="in.s3p">Open a new session and say what your day looks like. New versions arrive with one click: ASMO checks for updates by itself.</p></div>
         </div>
-<pre>/Applications/ASMO.app/Contents/Helpers/asmo setup</pre>
       </div>
     </section>
 
@@ -283,6 +282,7 @@ MD</pre>
           <details><summary data-i18n="fq.q2">Does the app use AI?</summary><p data-i18n="fq.a2">No model runs inside ASMO. The agent you already use does the understanding; ASMO stores exactly what it is told. Text you type by hand is turned into dated items by simple date-and-time rules.</p></details>
           <details><summary data-i18n="fq.q3">What does my agent send, and to whom?</summary><p data-i18n="fq.a3">ASMO only receives commands on your Mac. What your agent sends to its own provider is between you and that agent.</p></details>
           <details><summary data-i18n="fq.q4">Can I undo what an agent did?</summary><p data-i18n="fq.a4">Yes. asmo undo (or the undo MCP tool) takes back the last change, and the ones before it, until the app is restarted.</p></details>
+          <details><summary data-i18n="fq.q6">How does it update?</summary><p data-i18n="fq.a6">ASMO checks GitHub Releases after it opens and once a day. When a new version is out it asks; Update Now downloads it, checks the signature, replaces the app and reopens it. Your data is not touched.</p></details>
           <details><summary data-i18n="fq.q5">Which Macs are supported?</summary><p data-i18n="fq.a5">Apple silicon Macs with macOS 15 or later. An iPhone app builds from the same source, but it doesn't sync with the Mac yet.</p></details>
         </div>
       </div>
@@ -340,16 +340,17 @@ MD</pre>
         "ca.c3h": "重要的日子", "ca.c3p": "生日、纪念日和节日每年自动出现，支持公历和农历。",
         "ca.c4h": "旁边放着 Apple 日历", "ca.c4p": "可以选择把 Apple 日历的日程显示在事项旁边，经你授权，通过 macOS 读取。",
         "ca.c5h": "中文和英文", "ca.c5p": "界面跟随系统，也可以在设置里选语言。你写的内容保持原样，不会被翻译。",
-        "ca.c6h": "默认私密", "ca.c6p": "数据是 app 沙盒里的一个本地文件。没有账号，没有同步服务，不上传任何内容。",
-        "in.kicker": "安装", "in.h2": "两分钟装好，然后直接说。",
+        "ca.c6h": "默认私密", "ca.c6p": "数据是你 Mac 上的一个本地文件。没有账号，没有同步服务，不上传任何内容。",
+        "in.kicker": "安装", "in.h2": "下载、打开，然后直接说。",
         "in.s1h": "下载", "in.s1p": "从 GitHub Releases 下载 zip，解压后把 逐日 拖进「应用程序」。已经过 Apple 签名和公证。",
-        "in.s2h": "装好命令", "in.s2p": "运行一次下面这行。它会把 asmo 链接到 ~/.local/bin，给 Claude Code 和 Codex 装上 skill，并注册 MCP 服务。",
-        "in.s3h": "跟 agent 说", "in.s3p": "开一个新会话，说出你今天的安排。macOS 可能会询问一次终端能否使用 逐日 的数据，请允许。",
+        "in.s2h": "打开它", "in.s2p": "逐日会自己连好这台 Mac 上的 Claude Code、Codex 和 Claude 桌面版。什么都不用输入；设置里能看到连接状态。",
+        "in.s3h": "跟 agent 说", "in.s3p": "开一个新会话，说出你今天的安排。新版本点一下就能装：逐日会自己检查更新。",
         "fq.kicker": "常见问题", "fq.h2": "直接回答。",
         "fq.q1": "免费吗？", "fq.a1": "免费。逐日采用 MIT 协议，没有账号、订阅或使用限制，源码在 GitHub 上。",
         "fq.q2": "app 用 AI 吗？", "fq.a2": "逐日内部不运行任何模型。理解由你已经在用的 agent 完成，逐日只按收到的内容原样保存。你手动输入的文字，会按简单的日期和时间规则变成带日期的事项。",
         "fq.q3": "我的 agent 会把什么发给谁？", "fq.a3": "逐日只在你的 Mac 上接收命令。你的 agent 把什么发给它的服务商，是你和那个 agent 之间的事。",
         "fq.q4": "agent 做的修改能撤销吗？", "fq.a4": "能。asmo undo（或 MCP 里的 undo 工具）撤回上一次修改，可以连续撤回，直到 app 重启为止。",
+        "fq.q6": "怎么更新？", "fq.a6": "逐日打开后和之后每天会检查 GitHub Releases。有新版本时会询问你；立即更新会下载新版本、检查签名、替换 app 并重新打开。你的数据不受影响。",
         "fq.q5": "支持哪些 Mac？", "fq.a5": "macOS 15 及以上、Apple 芯片的 Mac。iPhone 版可以从同一份源码构建，但目前还不和 Mac 同步。",
         "cta.h": "给你的 agent 一个日历。", "cta.fine": "Apple 芯片，macOS 15 或更高版本。MIT 协议。下载来自 GitHub Releases。", "cta.src": "阅读源码",
         "foot.rel": "版本发布", "foot.issues": "报告问题", "foot.tt": "作者的另一个项目：ThunderTalk"

@@ -14,7 +14,7 @@ rm -rf .build
 # Xcode's own DerivedData for this project (builds from the Xcode app).
 rm -rf ~/Library/Developer/Xcode/DerivedData/ASMO-*
 # Debug-only test files the app wrote into its caches.
-caches=~/Library/Containers/com.realallensong.asmo/Data/Library/Caches
+caches=~/Library/Caches/com.realallensong.asmo
 rm -f "$caches"/asmo-image-*.png "$caches"/asmo-voice-running.aiff "$caches"/asmo-snapshot.png "$caches"/asmo-*.txt
 # Model weights from when the app ran its own models (it no longer does).
 rm -rf "$caches/huggingface" "$caches/qwen3-speech"
