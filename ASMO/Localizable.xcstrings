@@ -3593,6 +3593,22 @@
         }
       }
     },
+    "打开这一天": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open this day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开这一天"
+          }
+        }
+      }
+    },
     "打开这一天的页面": {
       "localizations": {
         "en": {
@@ -6325,6 +6341,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "记到未安排"
+          }
+        }
+      }
+    },
+    "记到这一天": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note on this day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "记到这一天"
           }
         }
       }

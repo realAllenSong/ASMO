@@ -66,9 +66,9 @@ final class PhoneChaosUITests: XCTestCase {
         app.typeText(String(repeating: "明天下午三点和小林在公司楼下的咖啡店讨论下个季度的产品发布计划", count: 2))
         sleep(1); shot("bar-long-text")
         app.swipeUp(velocity: .fast); sleep(1); shot("scrolled-with-keyboard")
-        if app.buttons["captureBarClose"].exists { app.buttons["captureBarClose"].tap() }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         sleep(1); shot("bar-closed-with-draft")
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "收起 puts the keyboard away")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "a tap outside puts the keyboard away")
         if app.buttons["todayButton"].waitForExistence(timeout: 1) { app.buttons["todayButton"].tap() }
         sleep(1)
 

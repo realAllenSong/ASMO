@@ -438,6 +438,7 @@ struct PlannerView: View {
             #else
             // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
             NavigationStack {
+                ZStack(alignment: .bottom) {
                 CalendarHost(key: calendarKey) { desktopMonth }
                     .equatable()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -450,8 +451,10 @@ struct PlannerView: View {
                         }
                     }
                     .animation(.smooth(duration: 0.2), value: barOpen)
-                    // The bar sits in the safe area, so the keyboard lifts it instead of covering it.
-                    .safeAreaInset(edge: .bottom, spacing: 0) { bottomControls }
+                    // The calendar keeps its shape when the keyboard comes up; only the bar rides above it.
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
+                    bottomControls
+                }
                     .background(theme.paper.ignoresSafeArea())
                     .toolbar(.hidden, for: .navigationBar)
                     .navigationDestination(item: $editingDay) { day in
@@ -2182,7 +2185,11 @@ struct PlannerView: View {
         // iPhone: months in one continuous vertical scroll (Apple Calendar), each built when it scrolls into view.
         return PhoneMonthScroller(start: monthCursor, jump: 0, today: clock.today, theme: theme, calendar: calendar,
                                   items: { desktopCalendarItems($0, calendar: calendar) },
-                                  openDay: { openDocument($0) }, settings: { sheet = .settings })
+                                  openDay: { openDocument($0) },
+                                  writeDay: { day in
+                                      openDocument(day)
+                                      Task { try? await Task.sleep(for: .milliseconds(550)); pageController.focus() }
+                                  }, settings: { sheet = .settings })
         #else
         let month = CalendarMonth(containing: monthCursor, calendar: calendar)
         let visible = Set(month.days)
@@ -3007,11 +3014,18 @@ struct PlannerView: View {
         // With Apple Intelligence, the assistant reads it (commands like "删掉看房" still go straight to the rules).
         if PhoneAssistant.isAvailable && barCommand == nil {
             barText = ""
+            closeBar()
             Task { await askAssistant(text) }
             return
         }
         #endif
-        if commitDictation(text, defaultDay: clock.today) != nil { barText = "" }
+        if commitDictation(text, defaultDay: clock.today) != nil {
+            barText = ""
+            #if os(iOS)
+            // Sent: the keyboard gets out of the way so the item can be seen landing on its day.
+            closeBar()
+            #endif
+        }
     }
 
     #if os(iOS)

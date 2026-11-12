@@ -56,6 +56,15 @@ final class PhoneWalkthroughUITests: XCTestCase {
         sleep(1)
         shot("back-to-today")
 
+        // Press and hold a day: a preview of it, with actions.
+        let held = app.descendants(matching: .any)["calendar-day-2026-11-11"]
+        if held.waitForExistence(timeout: 3) { held.press(forDuration: 1.0) }
+        sleep(1)
+        shot("day-peek")
+        XCTAssertTrue(app.buttons["打开这一天"].waitForExistence(timeout: 2), "press and hold shows the day's actions")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.96)).tap()
+        sleep(1)
+
         // Open a busy day.
         let day = app.descendants(matching: .any)["calendar-day-2026-11-11"]
         if day.waitForExistence(timeout: 3) { day.tap() }

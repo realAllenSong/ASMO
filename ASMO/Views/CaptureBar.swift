@@ -137,17 +137,6 @@ struct CaptureBar: View {
                     .phaseAnimator([0.8, 1.3]) { $0.scaleEffect($1) } animation: { _ in .easeInOut(duration: 0.55) }
                     .padding(.leading, 4)
             }
-            #if os(iOS)
-            // Put the keyboard away (the draft stays).
-            Button { focused = false; expanded = false } label: {
-                Image(systemName: "chevron.down").font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(theme.quiet)
-                    .frame(width: 30, height: 32).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("收起")
-            .accessibilityIdentifier("captureBarClose")
-            #endif
             TextField("快速记录", text: $text,
                       prompt: Text(recording ? "正在听… 再点一下麦克风结束" : transcribing ? "正在转写…"
                                    : Self.hint),
