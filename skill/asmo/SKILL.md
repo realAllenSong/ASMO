@@ -1,0 +1,111 @@
+---
+name: asmo
+description: Read and change the user's 逐日 (ASMO) planner on this Mac with the `asmo` command — their to-dos, schedule, subtasks, repeating routines, important dates, and each day's page of notes (Markdown with pictures, tables, code and mermaid diagrams). Use when the user asks what is on today / this week, wants things planned, added, moved, rescheduled, checked off or deleted, wants a day or week laid out from a list or a conversation, or wants notes, a picture, a link, a table or a diagram put on a day, or mentions 逐日, ASMO, their to-do list, planner or schedule. 待办、日程、计划、今天要做什么、安排、改期、打卡、每日例行、笔记、插图、画图。
+---
+
+# asmo
+
+`asmo` talks to the 逐日 (ASMO) app on this Mac. The app starts in the background if it isn't running, and open
+windows update as you work. Answers are JSON. Run `asmo help` for the full list.
+
+You do the thinking; the app stores exactly what you send. Work out dates and times yourself and pass them
+explicitly — nothing is guessed from the title.
+
+## Read first
+
+```bash
+asmo today                 # tasks (subtasks nested), routines, and the text of the day's page
+asmo day 2026-11-14
+asmo list today +7 --open  # unfinished tasks in a range
+asmo search "report"
+```
+
+Look before you write: check the day for an item that already says the same thing, and change it instead of
+adding a second one.
+
+## Write
+
+```bash
+asmo add "Call Li about the lease" --day tomorrow --time 15:00 --end 15:30 --note "ask about the deposit"
+asmo set 3f9a --time 16:00          # ids can be shortened to 4+ characters; a new start keeps the length
+asmo set 3f9a --day +2 --time none  # move it, drop the time
+asmo done 3f9a 81c2
+asmo rm 3f9a                        # subtasks go with it
+```
+
+Several items, or anything with subtasks, in one call:
+
+```bash
+asmo add --json --day today <<'EOF'
+[
+  {"title": "Ship the release", "time": "10:00", "end": "12:00",
+   "subtasks": [{"title": "Run the tests"}, {"title": "Write the notes"}]},
+  {"title": "Gym", "time": "18:30"},
+  {"title": "Renew the domain", "day": "2026-12"}
+]
+EOF
+```
+
+- Days: `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, `+N` / `-N`, or `YYYY-MM` for "some time that month".
+- Times: 24-hour `HH:MM`. An end earlier than the start means the next day.
+- Titles are short and say the thing to do; keep the user's language. Detail goes in `--note`.
+- Subtasks: up to three levels; they move with their parent.
+
+## The day's page (notes, pictures, diagrams)
+
+Every day has a free page under its items. Write it in Markdown; it shows up in the app as formatted text the user
+can keep editing. Things to do belong in `asmo add`, not on the page.
+
+````bash
+asmo page today                       # the page as blocks b1, b2, … each with its Markdown
+asmo page write today <<'MD'          # goes at the end; --replace rewrites the page; --after b2 | top places it
+## Launch notes
+
+Decided to ship **Friday**. Details in the [doc](https://example.com/doc).
+
+| Step | Owner |
+| --- | --- |
+| Tests | Li |
+
+```mermaid
+graph LR
+  Build --> Test --> Ship
+```
+
+![the mock-up](/Users/me/Desktop/mock.png)
+MD
+asmo page set today b3 <<< "Decided to ship **Monday**."   # replace one block
+asmo page rm today b5 b6
+asmo attach ~/Desktop/photo.jpg --day today --caption "whiteboard"
+````
+
+- Supported: headings, bold, italic, strike, `code`, links, bullet and numbered lists, `- [ ]` checkboxes, quotes,
+  tables, fenced code, mermaid diagrams in a `mermaid` code fence (drawn as pictures; a mistake in the diagram
+  comes back as an error to fix), and pictures by file path or URL.
+- Block ids are positions: read the page right before `set` / `rm`.
+- A picture already on the page reads back as `![…](asmo-image:N)`; keep that text to keep the picture.
+
+## Important dates
+
+```bash
+asmo dates
+asmo date add "Mum's birthday" --on 03-08 --year 1968 --lunar   # --kind birthday | anniversary | holiday
+asmo date rm 4778
+```
+
+## Routines (repeating items)
+
+```bash
+asmo routines
+asmo routine add "Stretch" --on weekdays --time 08:00     # daily | weekdays | weekends | mon,thu
+asmo routine done 27f4 --day today                        # done | skip | clear, for one day
+asmo routine stop 27f4                                    # ends it from today on
+```
+
+## Rules
+
+- `asmo undo` takes back the last change made with asmo (repeat for earlier ones), until the app is restarted.
+  Still, delete only what the user asked to remove.
+- Items with `"appleCalendar": true` mirror Apple Calendar and can't be changed here.
+- Stay in the background: use `asmo open` only when the user asks to see the app.
+- After changing things, tell the user briefly what is now on which day (titles and times, not ids).

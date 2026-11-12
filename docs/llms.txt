@@ -1,0 +1,18 @@
+# ASMO (逐日)
+
+> ASMO is a free, open-source calendar and to-do list for macOS that coding agents can use. Claude Code, Codex and other agents read and change it through the `asmo` command line; apps without a shell use its MCP server (`asmo mcp`). The app runs no language model itself. MIT licensed.
+
+## Key facts
+
+- Platform: Apple silicon Mac, macOS 15 or later. Signed with a Developer ID and notarized.
+- Price: free, open source, MIT license. No account, no cloud, no subscription.
+- Data: a local file in the app's sandbox; the app is the only writer, and open windows update while an agent works.
+- Agent surface: `asmo today | day | list | search | add | set | done | rm | page | attach | routine | date | undo | mcp | setup`. Answers are JSON.
+- Day pages: written in Markdown (headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by path or URL, mermaid diagrams drawn by a bundled copy of mermaid). Read back as blocks b1, b2… that can be replaced or removed one at a time.
+- Undo: `asmo undo` takes back changes made through the command until the app restarts.
+- Interface: English and Chinese; content is never translated.
+
+## Links
+
+- Source: https://github.com/realAllenSong/ASMO
+- Download: https://github.com/realAllenSong/ASMO/releases/latest

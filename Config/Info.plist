@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key><string>逐日</string>
+    <key>CFBundleName</key><string>逐日</string>
+    <!-- 逐日 is the name everywhere (Dock, menu bar, Finder); ASMO is the English name and the bundle's file name. -->
+    <key>LSHasLocalizedDisplayName</key><true/>
+    <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>UILaunchScreen</key><dict/>
+    <key>UIBackgroundModes</key><array><string>remote-notification</string></array>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>显示选中的 Apple 日历，并在确认后写入日程。</string>
+    <key>NSRemindersFullAccessUsageDescription</key><string>在「逐日」专用提醒列表里设置提醒，跨 App 同步完成状态。</string>
+    <key>NSMicrophoneUsageDescription</key><string>录制你主动口述的待办。</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>在设备上把口述待办转成文字。</string>
+    <key>CFBundleURLTypes</key><array><dict>
+        <key>CFBundleURLName</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+        <key>CFBundleURLSchemes</key><array><string>asmo</string></array>
+    </dict></array>
+    <key>ASMOCloudContainer</key><string>$(ASMO_CLOUD_CONTAINER)</string>
+</dict>
+</plist>

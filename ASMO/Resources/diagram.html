@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  #box { display: inline-block; max-width: 640px; padding: 8px; }
+  #box svg { display: block; }
+</style>
+<script src="mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: false, theme: "neutral", securityLevel: "strict", suppressErrorRendering: true,
+    fontFamily: "-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif"
+  });
+  // Draws one diagram into the page and reports its size (or the parser's complaint).
+  async function draw(source) {
+    const box = document.getElementById("box");
+    try {
+      const { svg } = await mermaid.render("d" + Date.now(), source);
+      box.innerHTML = svg;
+      const rect = box.getBoundingClientRect();
+      return { ok: true, width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+    } catch (error) {
+      box.innerHTML = "";
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  }
+</script>
+</head>
+<body><div id="box"></div></body>
+</html>

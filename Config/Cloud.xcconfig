@@ -1,0 +1,5 @@
+#include "Base.xcconfig"
+ASMO_CLOUD_CONTAINER = iCloud.com.realallensong.asmo
+CODE_SIGN_ENTITLEMENTS = Config/ASMO.Cloud.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = Config/ASMO.Cloud-iOS.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*] = Config/ASMO.Cloud-iOS.entitlements

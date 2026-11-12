@@ -1,0 +1,20 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+      - run: xcodebuild -version
+      - run: swift test
+      - name: Build Mac app
+        run: xcodebuild -scheme ASMO -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Build iPhone app and UI tests
+        run: xcodebuild -scheme ASMO -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build-for-testing
