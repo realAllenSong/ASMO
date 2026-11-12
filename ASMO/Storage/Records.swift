@@ -225,6 +225,7 @@ enum ASMOStore {
         switch ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] {
         case "1": name = "ASMO-Test"
         case "demo": name = "ASMO-Demo"
+        case "sync": name = "ASMO-Sync"     // an empty store for checking what iCloud brings down
         default: break
         }
         #endif
@@ -232,8 +233,14 @@ enum ASMOStore {
         // Outside the sandbox the store lives in ~/Library/Application Support/ASMO (copied over once from the
         // sandbox container earlier versions used).
         AppPaths.moveOutOfSandbox(name)
+        var synced = name == "ASMO"
+        #if DEBUG
+        // Testing iCloud sync on a test store (ASMO_CLOUD=1): Debug builds use Apple's development environment,
+        // which is separate from the data release builds sync.
+        if ProcessInfo.processInfo.environment["ASMO_CLOUD"] == "1" { synced = true }
+        #endif
         let config = ModelConfiguration(name, schema: schema, url: AppPaths.support.appendingPathComponent(name + ".store"),
-                                        cloudKitDatabase: name == "ASMO" ? cloud : .none)
+                                        cloudKitDatabase: synced ? cloud : .none)
         #else
         let config = ModelConfiguration(name, schema: schema, cloudKitDatabase: name == "ASMO" ? cloud : .none)
         #endif
