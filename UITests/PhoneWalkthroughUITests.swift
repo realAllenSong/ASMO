@@ -11,7 +11,7 @@ final class PhoneWalkthroughUITests: XCTestCase {
         continueAfterFailure = true
         app = XCUIApplication()
         app.launchEnvironment["ASMO_TEST_STORE"] = "demo"
-        app.launchArguments += ["-AppleLanguages", "(zh-Hans)"]
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-desktopAppearance", "light"]
         folder = ProcessInfo.processInfo.environment["ASMO_SHOTS"] ?? NSTemporaryDirectory()
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     }
@@ -32,7 +32,7 @@ final class PhoneWalkthroughUITests: XCTestCase {
         app.swipeUp()
         sleep(1)
         shot("swipe-up")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "12月")).firstMatch.exists, "swiping up shows the next month")
+        XCTAssertTrue(app.buttons["monthMenu"].label.contains("12"), "swiping up shows the next month")
         app.swipeDown()
         sleep(1)
         shot("swipe-down")
@@ -42,6 +42,19 @@ final class PhoneWalkthroughUITests: XCTestCase {
         app.swipeRight()
         sleep(1)
         shot("swipe-right")
+
+        // The month name opens a list of months.
+        app.buttons["monthMenu"].tap()
+        sleep(1)
+        shot("month-menu")
+        let pick = app.buttons["pick-month-3"]
+        if pick.waitForExistence(timeout: 2) { pick.tap() }
+        sleep(1)
+        shot("picked-march")
+        let back = app.buttons["今天"]
+        if back.waitForExistence(timeout: 2) { back.tap() }
+        sleep(1)
+        shot("back-to-today")
 
         // Open a busy day.
         let day = app.descendants(matching: .any)["calendar-day-2026-11-11"]
@@ -55,10 +68,15 @@ final class PhoneWalkthroughUITests: XCTestCase {
         app.swipeDown()
         sleep(1)
         shot("day-scrolled-back")
-        let done = app.buttons["完成"]
-        if done.exists { done.tap() }
+        // Tap into the page to write, then leave by swiping from the left edge.
+        app.descendants(matching: .any)["pageText"].firstMatch.tap()
+        sleep(1)
+        shot("day-writing")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)))
         sleep(2)
-        shot("day-closed")
+        shot("day-swiped-back")
+        XCTAssertTrue(app.buttons["monthMenu"].waitForExistence(timeout: 3), "an edge swipe goes back to the month")
 
         // The capture bar.
         let bar = app.buttons["captureBarOpen"]

@@ -239,7 +239,7 @@ struct PlannerView: View {
                     .transition(.scale(scale: 0.92).combined(with: .opacity))
             } else if editingDay == nil {
             HStack(spacing: 10) {
-            if !barOpen, let direction = todayDirection {
+            if !barOpen, !Self.compactLayout, let direction = todayDirection {
                 TodayButton(direction: direction, next: page == .day ? todayStatus.next : nil, theme: theme, action: showToday)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
@@ -256,7 +256,7 @@ struct PlannerView: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: todayDirection)
             } else {
                 #if os(iOS)
-                phonePageBar.transition(.opacity.combined(with: .move(edge: .bottom)))
+                EmptyView()
                 #endif
             }
         }
@@ -436,17 +436,39 @@ struct PlannerView: View {
                 .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             #else
-            // iPhone: the calendar is home too; tapping a day opens its page over it (full screen).
-            ZStack {
+            // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
+            NavigationStack {
                 CalendarHost(key: calendarKey) { desktopMonth }
                     .equatable()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if editingDay != nil {
-                    writingView
-                        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-                }
+                    .background(theme.paper.ignoresSafeArea())
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(item: $editingDay) { day in
+                        writingView
+                            .navigationTitle(AppLanguage.dayTitle(month: day.month, day: day.day ?? 1) + " " + journalWeekday(day))
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbarBackground(theme.paper, for: .navigationBar)
+                            .toolbar {
+                                if pageController.isEditing {
+                                    ToolbarItem(placement: .confirmationAction) {
+                                        Button("完成") { pageController.resignFocus() }.fontWeight(.semibold)
+                                    }
+                                } else if day == clock.today, todayStatus.total > 0 {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        ProgressRing(done: todayStatus.done, total: todayStatus.total, theme: theme)
+                                    }
+                                }
+                            }
+                    }
             }
-            .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: editingDay == nil)
+            .tint(theme.accent)
+            // However the page is left (back button, edge swipe, another day), what was written is kept and organized.
+            .onChange(of: editingDay) { left, _ in
+                guard let left else { return }
+                storePhonePage(left)
+                pageController.resignFocus()
+                Task { try? await Task.sleep(for: .milliseconds(400)); await organizeStoredPage(left) }
+            }
             #endif
         }
         .background(theme.paper.ignoresSafeArea())
@@ -562,7 +584,7 @@ struct PlannerView: View {
         pageController.load(pageData(day))
         pageController.resignFocus()
         #endif
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) { editingDay = day }
+        editingDay = day
     }
 
     /// Leaving the page for another view: start organizing, then go at once. Results still land in their days
@@ -571,8 +593,9 @@ struct PlannerView: View {
         guard let day = editingDay, !finishingEdit else { return }
         organizeTick += 1
         #if os(iOS)
-        storePhonePage(day)
-        pageController.resignFocus()
+        editingDay = nil
+        next()
+        return
         #endif
         Task { @MainActor in
             // One frame so the page reads its lines before it goes.
@@ -592,12 +615,16 @@ struct PlannerView: View {
         next?()
         return
         #endif
+        #if os(iOS)
+        guard let day = editingDay else { return }
+        instantly { selected = day }
+        editingDay = nil
+        next?()
+        return
+        #else
         guard let day = editingDay, !finishingEdit else { return }
         finishingEdit = true
         organizeTick += 1
-        #if os(iOS)
-        storePhonePage(day)
-        pageController.resignFocus()
         #endif
         Task {
             try? await Task.sleep(for: .milliseconds(120))
@@ -660,20 +687,9 @@ struct PlannerView: View {
         let relative = [0: String(localized: " · 今天"), 1: String(localized: " · 明天"), -1: String(localized: " · 昨天")][dayDelta(clock.today, day) ?? 99] ?? ""
         let rows = phoneRows(day)
         let written = writing ? "" : PageController.decode(pageData(day)).trimmed
+        // The date and today's progress are in the navigation bar above.
+        _ = (isToday, relative)
         return VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text("\(day.month)月\(day.day ?? 1)日")
-                    .font(.system(size: isToday ? 19 : 16, weight: .semibold))
-                    .foregroundStyle(isToday ? theme.accent : theme.ink)
-                Text(journalWeekday(day) + relative)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(theme.quiet)
-                Spacer(minLength: 0)
-                if isToday, todayStatus.total > 0 {
-                    ProgressRing(done: todayStatus.done, total: todayStatus.total, theme: theme)
-                }
-            }
-            .padding(.horizontal, 4)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(rows) { entry in
                     DesktopJournalTask(entry: entry, calendar: clock.calendar, theme: theme, motion: nil)

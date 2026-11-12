@@ -85,11 +85,20 @@ struct CaptureBar: View {
             expanded = true
         } label: {
             HStack(spacing: 8) {
+                #if os(iOS)
+                // On iPhone it's for typing (the keyboard has its own dictation key).
+                Image(systemName: "square.and.pencil").font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(theme.accent)
+                Text(text.trimmed.isEmpty ? "记一件事" : "继续草稿")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(theme.ink.opacity(0.82))
+                #else
                 ASMOIcon(mark: .mic, size: 15)
                     .foregroundStyle(theme.accent)
                 Text(text.trimmed.isEmpty ? "写或说" : "继续草稿")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(theme.ink.opacity(0.82))
+                #endif
                 #if os(macOS)
                 Text("⌘K")
                     .font(.system(size: 11, weight: .medium))
@@ -156,6 +165,7 @@ struct CaptureBar: View {
                     submit()
                 }
                 #endif
+            #if os(macOS)
             Button { focused = true; toggleVoice() } label: {
                 ASMOIcon(mark: recording ? .stop : .mic, size: 15)
                     .foregroundStyle(recording ? theme.onAccent : theme.accent)
@@ -169,6 +179,7 @@ struct CaptureBar: View {
             .help(recording ? "结束并转写" : "语音输入")
             .accessibilityLabel(recording ? "结束录音" : "语音输入")
             .accessibilityIdentifier("captureBarMic")
+            #endif
             if !text.trimmed.isEmpty && !recording {
                 Button(action: submit) {
                     Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold))

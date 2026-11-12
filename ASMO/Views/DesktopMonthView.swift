@@ -61,6 +61,14 @@ struct DesktopMonthView: View {
     var settings: (() -> Void)? = nil
     var logo = false
     @State private var showingMonthPlans = false
+    #if os(iOS)
+    /// The month follows the finger while it is dragged up or down.
+    @GestureState private var drag: CGFloat = 0
+    /// Which way the last month change went (for the slide).
+    @State private var forward = true
+    @State private var picking = false
+    @State private var pickerYear = 2026
+    #endif
     @State private var lastClick: (day: PlanDate, at: Date)?
     #if os(macOS)
     private static var doubleClick: TimeInterval { NSEvent.doubleClickInterval }
@@ -82,6 +90,9 @@ struct DesktopMonthView: View {
                         .padding(.trailing, 8)
                         .accessibilityHidden(true)
                 }
+                #if os(iOS)
+                monthMenu
+                #else
                 Button(action: jump) {
                     HStack(spacing: 7) {
                         Text(AppLanguage.monthTitle(year: cursor.year, month: cursor.month))
@@ -93,6 +104,7 @@ struct DesktopMonthView: View {
                 .buttonStyle(DesktopButtonStyle(theme: theme))
                 .help("跳到月份")
                 .accessibilityAddTraits(.isHeader)
+                #endif
                 #if os(macOS)
                 // The month's arrows sit right by its name (纸面).
                 monthArrow(.left, String(localized: "上个月"), offset: -1)
@@ -101,8 +113,15 @@ struct DesktopMonthView: View {
                 if !monthPlans.isEmpty { monthPlansButton }
                 Spacer()
                 #if os(iOS)
-                monthArrow(.left, String(localized: "上个月"), offset: -1)
-                monthArrow(.right, String(localized: "下个月"), offset: 1)
+                if cursor.year != today.year || cursor.month != today.month {
+                    Button { move(by: monthsBetween(cursor, today)) } label: {
+                        Text("今天").font(.system(size: 15, weight: .semibold)).foregroundStyle(theme.accent)
+                            .padding(.horizontal, 10).frame(height: 32)
+                            .background(theme.block, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
+                }
                 #endif
                 if let settings {
                     Button(action: settings) {
@@ -156,9 +175,9 @@ struct DesktopMonthView: View {
             }
             #endif
         }
-        .padding(.horizontal, Self.compact ? 14 : 20)
-        .padding(.top, Self.compact ? 6 : 8)
-        .padding(.bottom, Self.compact ? 74 : 70)
+        .padding(.horizontal, Self.compact ? 6 : 20)
+        .padding(.top, Self.compact ? 4 : 8)
+        .padding(.bottom, Self.compact ? 62 : 70)
     }
 
     #if os(iOS)
@@ -170,7 +189,7 @@ struct DesktopMonthView: View {
         GeometryReader { proxy in
             let rowCount = max(1, month.days.count / 7)
             let height = proxy.size.height / CGFloat(rowCount)
-            let capacity = max(1, Int((height - 26) / 16))
+            let capacity = max(1, Int((height - 30) / 17))
             VStack(spacing: 0) {
                 ForEach(0..<rowCount, id: \.self) { row in
                     HStack(spacing: 0) {
@@ -179,17 +198,97 @@ struct DesktopMonthView: View {
                         }
                     }
                     .frame(height: height)
-                    .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
+                    .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 0.5) }
+                }
+            }
+            .id(cursor.key)
+            .transition(.asymmetric(insertion: .move(edge: forward ? .bottom : .top).combined(with: .opacity),
+                                    removal: .move(edge: forward ? .top : .bottom).combined(with: .opacity)))
+            .offset(y: drag * 0.45)
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        // Up (or left) for the next month, down (or right) for the last; the grid follows the finger first.
+        .gesture(DragGesture(minimumDistance: 12)
+            .updating($drag) { value, state, _ in
+                if abs(value.translation.height) > abs(value.translation.width) { state = value.translation.height }
+            }
+            .onEnded { value in
+                let x = value.translation.width, y = value.translation.height
+                let flungY = value.predictedEndTranslation.height
+                if abs(y) > abs(x), abs(flungY) > 90 || abs(y) > 70 { move(by: y < 0 ? 1 : -1) }
+                else if abs(x) > abs(y) * 1.3, abs(x) > 50 { move(by: x < 0 ? 1 : -1) }
+            })
+        .sensoryFeedback(.selection, trigger: cursor.key)
+    }
+
+    /// Changes month with the slide (the parent moves the cursor).
+    private func move(by months: Int) {
+        guard months != 0 else { return }
+        forward = months > 0
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shift(months) }
+    }
+
+    private func monthsBetween(_ from: PlanDate, _ to: PlanDate) -> Int { (to.year - from.year) * 12 + to.month - from.month }
+
+    /// The month's name drops down a small card: the year with arrows, and its twelve months to tap.
+    private var monthMenu: some View {
+        Button { pickerYear = cursor.year; picking = true } label: {
+            HStack(spacing: 6) {
+                Text(AppLanguage.monthTitle(year: cursor.year, month: cursor.month))
+                    .font(.system(size: 24, weight: .bold)).tracking(-0.5)
+                    .foregroundStyle(theme.ink)
+                    .contentTransition(.numericText())
+                Image(systemName: "chevron.down").font(.system(size: 13, weight: .semibold)).foregroundStyle(theme.quiet)
+                    .rotationEffect(.degrees(picking ? 180 : 0))
+            }
+            .padding(.horizontal, 6).padding(.vertical, 6).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("monthMenu")
+        .popover(isPresented: $picking, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            monthPicker.presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var monthPicker: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Button { withAnimation(.snappy) { pickerYear -= 1 } } label: {
+                    Image(systemName: "chevron.left").frame(width: 40, height: 36).contentShape(Rectangle())
+                }
+                Spacer()
+                Text(String(pickerYear)).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+                    .contentTransition(.numericText())
+                Spacer()
+                Button { withAnimation(.snappy) { pickerYear += 1 } } label: {
+                    Image(systemName: "chevron.right").frame(width: 40, height: 36).contentShape(Rectangle())
+                }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(1...12, id: \.self) { month in
+                    let current = pickerYear == cursor.year && month == cursor.month
+                    let isThisMonth = pickerYear == today.year && month == today.month
+                    Button {
+                        picking = false
+                        move(by: monthsBetween(cursor, PlanDate(year: pickerYear, month: month)))
+                    } label: {
+                        Text(AppLanguage.isEnglish ? Calendar(identifier: .gregorian).shortMonthSymbols[month - 1] : "\(month)月")
+                            .font(.system(size: 15, weight: current ? .semibold : .regular))
+                            .foregroundStyle(current ? theme.onAccent : isThisMonth ? theme.accent : theme.ink)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .background(current ? theme.accent : theme.block.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("pick-month-\(month)")
                 }
             }
         }
-        .contentShape(Rectangle())
-        // A thumb moves through months either way: up or left for the next one, down or right for the last.
-        .gesture(DragGesture(minimumDistance: 24).onEnded { value in
-            let x = value.translation.width, y = value.translation.height
-            if abs(x) > abs(y) * 1.3, abs(x) > 40 { shift(x < 0 ? 1 : -1) }
-            else if abs(y) > abs(x) * 1.3, abs(y) > 50 { shift(y < 0 ? 1 : -1) }
-        })
+        .padding(14)
+        .frame(width: 300)
     }
 
     private func compactCell(_ date: PlanDate, items: [CalendarDayItem], capacity: Int) -> some View {
@@ -198,27 +297,27 @@ struct DesktopMonthView: View {
         let visible = items.prefix(items.count > capacity ? max(0, capacity - 1) : capacity)
         return VStack(alignment: .center, spacing: 1) {
             Text(date.day.map(String.init) ?? "")
-                .font(.system(size: 12, weight: isToday ? .bold : .medium).monospacedDigit())
+                .font(.system(size: 14, weight: isToday ? .bold : .medium).monospacedDigit())
                 .foregroundStyle(isToday ? theme.onAccent : inMonth ? theme.ink : theme.quiet.opacity(0.55))
-                .frame(width: 22, height: 20)
+                .frame(width: 26, height: 24)
                 .background { if isToday { Circle().fill(theme.accent) } }
                 .padding(.top, 3).padding(.bottom, 1)
             ForEach(visible) { item in
                 let band = item.kind == .occasion || item.kind == .event || item.startMinute != nil
                 Text(item.previewTitle)
-                    .font(.system(size: 10.5, weight: band ? .medium : .regular))
+                    .font(.system(size: 11.5, weight: band ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .strikethrough(item.completed)
                     .foregroundStyle(item.completed ? theme.quiet : band ? theme.accent : theme.ink.opacity(0.85))
                     .padding(.horizontal, 2)
-                    .frame(maxWidth: .infinity, minHeight: 15, alignment: .leading)
-                    .background(band && !item.completed ? theme.block : .clear, in: RoundedRectangle(cornerRadius: 2.5))
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                    .background(band && !item.completed ? theme.block : .clear, in: RoundedRectangle(cornerRadius: 3))
             }
             if items.count > visible.count {
                 Text("+\(items.count - visible.count)")
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(theme.quiet)
-                    .frame(maxWidth: .infinity, minHeight: 15, alignment: .leading).padding(.horizontal, 2)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading).padding(.horizontal, 2)
             }
             Spacer(minLength: 0)
         }

@@ -25,10 +25,18 @@ struct ASMOApp: App {
         }
         #endif
         AppLanguage.keepChineseForEarlierUsers(defaults)
+        #if os(macOS)
         if !defaults.bool(forKey: "paperLookApplied") {
             defaults.set(DesktopAppearance.light.rawValue, forKey: "desktopAppearance")
             defaults.set(true, forKey: "paperLookApplied")
         }
+        #else
+        // iPhone follows the system's light and dark (once, over the paper look earlier builds set).
+        if !defaults.bool(forKey: "phoneFollowsSystem") {
+            defaults.set(DesktopAppearance.system.rawValue, forKey: "desktopAppearance")
+            defaults.set(true, forKey: "phoneFollowsSystem")
+        }
+        #endif
         #if os(macOS)
         // Coding agents reach the app through the `asmo` command, set up for them without any typing.
         if case .success(let container) = storage { AgentBridge.start(container) }

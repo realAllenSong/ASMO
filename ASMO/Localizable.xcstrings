@@ -6217,6 +6217,22 @@
         }
       }
     },
+    "记一件事": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note something"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "记一件事"
+          }
+        }
+      }
+    },
     "记一件事…": {
       "localizations": {
         "en": {

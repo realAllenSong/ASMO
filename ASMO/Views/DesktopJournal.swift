@@ -270,7 +270,7 @@ struct DesktopJournalTask: View {
     private var timeColumn: some View {
         #if os(iOS)
         // Phone width: untimed rows give the space to the title; a time sits before it when there is one.
-        if entry.start != nil || timeLabel != nil { timeCell.frame(width: 50, alignment: .leading) }
+        if entry.start != nil || timeLabel != nil { timeCell.frame(width: 62, alignment: .leading) }
         #else
         timeCell.frame(width: 54, alignment: .leading)
         #endif
