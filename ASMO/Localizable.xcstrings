@@ -3721,6 +3721,22 @@
         }
       }
     },
+    "接着写…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep writing…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接着写…"
+          }
+        }
+      }
+    },
     "提前 %lld 分钟": {
       "localizations": {
         "en": {
@@ -7045,6 +7061,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "还有 %lld 项"
+          }
+        }
+      }
+    },
+    "这一页有格式、表格或图片，请在 Mac 上修改。在下面写的内容会加到页面末尾。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This page has formatting, tables or pictures; edit it on the Mac. What you write below is added to the end."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这一页有格式、表格或图片，请在 Mac 上修改。在下面写的内容会加到页面末尾。"
           }
         }
       }

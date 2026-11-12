@@ -164,142 +164,73 @@ struct DesktopMonthView: View {
     #if os(iOS)
     static let compact = true
 
-    /// Phone, like Apple Calendar: a compact month (dates with small dots) and, under it, the chosen day at full
-    /// width — times, titles and checkboxes that are actually readable. Tap a date to choose it; tap it again (or
-    /// a line of its list) to open its page. Swipe the month sideways for other months.
+    /// Phone: like Apple Calendar's detailed month — tall cells that fill the screen, each listing its items
+    /// as small tinted lines. Tap a day to open it in 逐日; swipe sideways for other months.
     private var compactGrid: some View {
-        let rowCount = max(1, month.days.count / 7)
-        return VStack(spacing: 0) {
-            VStack(spacing: 2) {
+        GeometryReader { proxy in
+            let rowCount = max(1, month.days.count / 7)
+            let height = proxy.size.height / CGFloat(rowCount)
+            let capacity = max(1, Int((height - 26) / 16))
+            VStack(spacing: 0) {
                 ForEach(0..<rowCount, id: \.self) { row in
                     HStack(spacing: 0) {
                         ForEach(month.days[(row * 7)..<((row + 1) * 7)], id: \.self) { day in
-                            compactCell(day, items: items[day] ?? [])
+                            compactCell(day, items: items[day] ?? [], capacity: capacity)
                         }
                     }
-                    .frame(height: 46)
+                    .frame(height: height)
+                    .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 30).onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                shift(value.translation.width < 0 ? 1 : -1)
-            })
-            Rectangle().fill(theme.line).frame(height: 1).padding(.top, 8)
-            dayAgenda
         }
+        .contentShape(Rectangle())
+        // A thumb moves through months either way: up or left for the next one, down or right for the last.
+        .gesture(DragGesture(minimumDistance: 24).onEnded { value in
+            let x = value.translation.width, y = value.translation.height
+            if abs(x) > abs(y) * 1.3, abs(x) > 40 { shift(x < 0 ? 1 : -1) }
+            else if abs(y) > abs(x) * 1.3, abs(y) > 50 { shift(y < 0 ? 1 : -1) }
+        })
     }
 
-    private func compactCell(_ date: PlanDate, items: [CalendarDayItem]) -> some View {
+    private func compactCell(_ date: PlanDate, items: [CalendarDayItem], capacity: Int) -> some View {
         let inMonth = date.month == cursor.month && date.year == cursor.year
         let isToday = date == today
-        let chosen = date == selected
-        let dots = Array(items.prefix(3))
-        return VStack(spacing: 4) {
+        let visible = items.prefix(items.count > capacity ? max(0, capacity - 1) : capacity)
+        return VStack(alignment: .center, spacing: 1) {
             Text(date.day.map(String.init) ?? "")
-                .font(.system(size: 16, weight: isToday || chosen ? .semibold : .regular).monospacedDigit())
-                .foregroundStyle(isToday ? theme.onAccent : chosen ? theme.accent : inMonth ? theme.ink : theme.quiet.opacity(0.5))
-                .frame(width: 32, height: 32)
-                .background {
-                    if isToday { Circle().fill(theme.accent) }
-                    else if chosen { Circle().fill(theme.block) }
-                }
-            HStack(spacing: 3) {
-                ForEach(dots) { item in
-                    Circle().fill(item.completed ? theme.quiet.opacity(0.35)
-                                  : item.startMinute != nil || item.kind != .task ? theme.accent : theme.ink.opacity(0.45))
-                        .frame(width: 5, height: 5)
-                }
+                .font(.system(size: 12, weight: isToday ? .bold : .medium).monospacedDigit())
+                .foregroundStyle(isToday ? theme.onAccent : inMonth ? theme.ink : theme.quiet.opacity(0.55))
+                .frame(width: 22, height: 20)
+                .background { if isToday { Circle().fill(theme.accent) } }
+                .padding(.top, 3).padding(.bottom, 1)
+            ForEach(visible) { item in
+                let band = item.kind == .occasion || item.kind == .event || item.startMinute != nil
+                Text(item.previewTitle)
+                    .font(.system(size: 10.5, weight: band ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .strikethrough(item.completed)
+                    .foregroundStyle(item.completed ? theme.quiet : band ? theme.accent : theme.ink.opacity(0.85))
+                    .padding(.horizontal, 2)
+                    .frame(maxWidth: .infinity, minHeight: 15, alignment: .leading)
+                    .background(band && !item.completed ? theme.block : .clear, in: RoundedRectangle(cornerRadius: 2.5))
             }
-            .frame(height: 5)
+            if items.count > visible.count {
+                Text("+\(items.count - visible.count)")
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(theme.quiet)
+                    .frame(maxWidth: .infinity, minHeight: 15, alignment: .leading).padding(.horizontal, 2)
+            }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 1.5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(inMonth ? Color.clear : theme.surface.opacity(0.35))
         .contentShape(Rectangle())
-        .onTapGesture {
-            if chosen { openDay(date) } else { select(date) }
-        }
+        .onTapGesture { select(date); openDay(date) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(date.label + (items.isEmpty ? "" : "，" + items.map(\.title).joined(separator: "，")))
         .accessibilityIdentifier("calendar-day-" + date.key)
-    }
-
-    /// The chosen day, one item per line.
-    private var dayAgenda: some View {
-        let list = items[selected] ?? []
-        let relative = selected == today ? String(localized: " · 今天") : ""
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(AppLanguage.dayTitle(month: selected.month, day: selected.day ?? 1) + " " + weekdayName(selected) + relative)
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Button { openDay(selected) } label: {
-                    HStack(spacing: 3) {
-                        Text("写这一天").font(.system(size: 14, weight: .medium))
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundStyle(theme.accent)
-                    .padding(.vertical, 6).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 14).padding(.bottom, 6)
-            if list.isEmpty {
-                Text("这天还没有安排")
-                    .font(.system(size: 15)).foregroundStyle(theme.quiet)
-                    .padding(.vertical, 18)
-                Spacer(minLength: 0)
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(list) { item in agendaRow(item) }
-                    }
-                    .padding(.bottom, 8)
-                }
-                .scrollIndicators(.hidden)
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private func agendaRow(_ item: CalendarDayItem) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Group {
-                if let minute = item.startMinute {
-                    Text(String(format: "%02d:%02d", minute / 60, minute % 60))
-                } else {
-                    Text(item.kind == .occasion ? String(localized: "全天") : "")
-                }
-            }
-            .font(.system(size: 14, weight: .medium, design: .monospaced))
-            .foregroundStyle(item.completed ? theme.quiet : theme.accent)
-            .frame(width: 48, alignment: .leading)
-            Text(item.previewTitle)
-                .font(.system(size: 16))
-                .strikethrough(item.completed)
-                .foregroundStyle(item.completed ? theme.quiet : theme.ink)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(3)
-            if let toggle = item.toggle {
-                Button(action: toggle) {
-                    ASMOCheckbox(complete: item.completed, theme: theme)
-                        .frame(width: 32, height: 32).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(item.completed ? String(localized: "未完成") : String(localized: "标记完成"))
-            }
-        }
-        .padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Rectangle().fill(theme.line.opacity(0.7)).frame(height: 0.5) }
-        .contentShape(Rectangle())
-        .onTapGesture { openDay(selected) }
-    }
-
-    private func weekdayName(_ date: PlanDate) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
-        guard let value = date.date(in: calendar) else { return "" }
-        return AppLanguage.weekday(calendar.component(.weekday, from: value))
     }
     #else
     static let compact = false

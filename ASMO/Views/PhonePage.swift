@@ -12,8 +12,59 @@ final class PageController: ObservableObject {
     /// Bumped to ask the editor to take or give up focus.
     @Published var focusRequest = 0
     @Published var wantsFocus = false
+    /// A page written on the Mac with formatting, tables or pictures, shown read-only: the phone can't keep those,
+    /// so what is written here is added after it instead of replacing it.
+    @Published var keptPage: String?
+    /// The page as stored when it was opened (to save nothing when nothing changed).
+    private(set) var opened: Data?
 
     var isEmpty: Bool { text.trimmed.isEmpty }
+
+    /// Opens a day's page.
+    func load(_ data: Data?) {
+        opened = data
+        if let data, Self.isRich(data) {
+            keptPage = Self.decode(data)
+            text = ""
+        } else {
+            keptPage = nil
+            text = Self.decode(data)
+        }
+    }
+
+    /// What to store for the page now; nil when it should stay exactly as it was.
+    func toStore() -> (data: Data?, changed: Bool) {
+        if keptPage != nil {
+            guard !text.trimmed.isEmpty, let opened,
+                  let page = try? NSMutableAttributedString(data: opened, options: [.documentType: NSAttributedString.DocumentType.rtfd],
+                                                            documentAttributes: nil) else { return (opened, false) }
+            let attributes = page.length > 0 ? page.attributes(at: page.length - 1, effectiveRange: nil).filter { $0.key == .font || $0.key == .foregroundColor } : [:]
+            page.append(NSAttributedString(string: (page.string.hasSuffix("\n") ? "" : "\n") + text, attributes: attributes))
+            return (try? page.data(from: NSRange(location: 0, length: page.length),
+                                   documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]), true)
+        }
+        guard text != Self.decode(opened) else { return (opened, false) }
+        return (Self.encode(text), true)
+    }
+
+    /// Anything a plain text view would lose: pictures, tables, links, bold, italic, strikethrough, highlight.
+    static func isRich(_ data: Data) -> Bool {
+        if let raw = String(data: data, encoding: .isoLatin1), raw.contains("\\trowd") || raw.contains("\\itap") { return true }
+        guard let page = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtfd],
+                                                 documentAttributes: nil) else { return false }
+        if page.string.contains("\u{FFFC}") { return true }
+        var rich = false
+        page.enumerateAttributes(in: NSRange(location: 0, length: page.length)) { attributes, _, stop in
+            if attributes[.attachment] != nil || attributes[.link] != nil || attributes[.strikethroughStyle] != nil
+                || attributes[.backgroundColor] != nil { rich = true }
+            if let font = attributes[.font] as? UIFont,
+               font.fontDescriptor.symbolicTraits.contains(.traitBold) || font.fontDescriptor.symbolicTraits.contains(.traitItalic) || font.pointSize > 16 {
+                rich = true
+            }
+            if rich { stop.pointee = true }
+        }
+        return rich
+    }
 
     /// The page as stored data (nil when empty), in the same RTFD form the Mac writes.
     func encoded() -> Data? { Self.encode(text) }
@@ -84,9 +135,26 @@ struct PhonePageEditor: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let kept = controller.keptPage {
+                Text(kept)
+                    .font(.system(size: 17))
+                    .lineSpacing(5)
+                    .foregroundStyle(theme.ink.opacity(0.85))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 5)
+                Text("这一页有格式、表格或图片，请在 Mac 上修改。在下面写的内容会加到页面末尾。")
+                    .font(.footnote).foregroundStyle(theme.quiet)
+                    .padding(.horizontal, 5)
+            }
+            editor
+        }
+    }
+
+    private var editor: some View {
         ZStack(alignment: .topLeading) {
             if controller.text.isEmpty {
-                Text(placeholder)
+                Text(controller.keptPage == nil ? placeholder : String(localized: "接着写…"))
                     .font(.system(size: 17))
                     .foregroundStyle(theme.quiet.opacity(0.75))
                     .padding(.top, 8).padding(.leading, 5)

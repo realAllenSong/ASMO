@@ -558,8 +558,9 @@ struct PlannerView: View {
         // The writing view opens on this day; the overview stays where it was underneath.
         instantly { writingFrom = day }
         #if os(iOS)
-        pageController.text = PageController.decode(pageData(day))
-        pageController.focus()
+        // A day opens to be read: from the top, without the keyboard. Tapping the page starts writing.
+        pageController.load(pageData(day))
+        pageController.resignFocus()
         #endif
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) { editingDay = day }
     }
@@ -723,8 +724,7 @@ struct PlannerView: View {
             editingDay = day
             selected = day
         }
-        pageController.text = PageController.decode(pageData(day))
-        pageController.focus()
+        pageController.load(pageData(day))
         Task { await organizeStoredPage(current) }
     }
 
@@ -770,7 +770,10 @@ struct PlannerView: View {
         let text = pageController.text
         // Only lines written since the page was last stored are new; older ones were organized already.
         let before = Set(PageController.decode(pageData(day)).components(separatedBy: "\n").map(\.trimmed))
-        savePage(PageController.encode(text), day: day)
+        // Nothing changed: the page stays exactly as stored (formatting written on the Mac included).
+        let stored = pageController.toStore()
+        guard stored.changed else { return }
+        savePage(stored.data, day: day)
         let lines = text.components(separatedBy: "\n").map(\.trimmed).filter { !$0.isEmpty && !before.contains($0) }
         if !lines.isEmpty, let page = dayPages.first(where: { $0.dayKey == day.key }) {
             page.pendingRaw = lines.joined(separator: "\n")

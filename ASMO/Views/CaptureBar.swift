@@ -194,10 +194,12 @@ struct CaptureBar: View {
                 .shadow(color: .black.opacity(theme.dark ? 0.45 : 0.16), radius: 18, y: 6)
         }
         .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
-        .task { focused = true }
+        // Focus once the bar has appeared (asking during its animation is ignored on iPhone).
+        .task { try? await Task.sleep(for: .milliseconds(120)); focused = true }
         .onChange(of: expanded) { _, open in if open { focused = true } }
-        .onChange(of: focused) { _, isFocused in
-            guard !isFocused else { return }
+        .onChange(of: focused) { was, isFocused in
+            // Only losing focus folds it: a focus request that hasn't landed yet is not a click elsewhere.
+            guard was, !isFocused else { return }
             // Clicking anywhere else folds the bar back into the small button (the draft stays).
             // A short grace period lets clicks on the bar's own buttons keep it open.
             Task {
