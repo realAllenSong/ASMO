@@ -2545,6 +2545,22 @@
         }
       }
     },
+    "复制 Markdown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Markdown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制 Markdown"
+          }
+        }
+      }
+    },
     "外观": {
       "localizations": {
         "en": {
@@ -3673,6 +3689,22 @@
         }
       }
     },
+    "把整份文档复制成 Markdown，可以直接贴给 AI": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copies the whole document as Markdown, ready to paste into an AI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把整份文档复制成 Markdown，可以直接贴给 AI"
+          }
+        }
+      }
+    },
     "拖到另一天即可改期": {
       "localizations": {
         "en": {
@@ -3989,6 +4021,22 @@
         }
       }
     },
+    "整份文档已复制为 Markdown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied the whole document as Markdown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整份文档已复制为 Markdown"
+          }
+        }
+      }
+    },
     "整理": {
       "localizations": {
         "en": {
@@ -4077,6 +4125,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "整理成待办 "
+          }
+        }
+      }
+    },
+    "文档": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Document"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文档"
           }
         }
       }

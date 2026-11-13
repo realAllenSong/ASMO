@@ -190,6 +190,8 @@ struct PlannerView: View {
     @State private var pageTranscribing = false
     @State private var voiceOrganizing = false
     /// The Apple Intelligence assistant (iPhone) is working on what was typed or said.
+    /// Mac home: "paper" (one continuous document, like a doc you just write in) or "calendar".
+    @AppStorage("macHome") private var macHome = "paper"
     @State private var assistantWorking = false
     @State private var assistantCommands: AgentCommands?
     /// Something said or typed in the bar is being organized by the model.
@@ -432,9 +434,14 @@ struct PlannerView: View {
             #if os(macOS)
             // Mac: the calendar is home; a day is written in its popup (DayEditorSheet). The month only redraws
             // when what it shows changed (opening a day, typing in it, the notice… leave it alone: no hitch).
-            CalendarHost(key: calendarKey) { desktopMonth }
-                .equatable()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if macHome == "paper" {
+                paperHome
+            } else {
+                CalendarHost(key: calendarKey) { desktopMonth }
+                    .equatable()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) { homeSwitch.padding(.top, 10) }
+            }
             #else
             // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
             NavigationStack {
@@ -925,6 +932,81 @@ struct PlannerView: View {
 
     #if os(macOS)
     /// The day being written, as a page over the calendar.
+    /// The days on the paper: the past week, today, and the two weeks ahead.
+    private var paperDays: [PlanDate] {
+        (-7...14).compactMap { clock.offset(days: $0) }
+    }
+
+    /// 文档 | 日历.
+    private var homeSwitch: some View {
+        HStack(spacing: 2) {
+            ForEach([("paper", "文档"), ("calendar", "日历")], id: \.0) { value, label in
+                Button {
+                    guard macHome != value else { return }
+                    if documentDay != nil { closeDocument() }
+                    pageController.textView?.window?.makeFirstResponder(nil)
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { macHome = value }
+                } label: {
+                    Text(label.localized).font(.system(size: 12, weight: macHome == value ? .semibold : .medium))
+                        .foregroundStyle(macHome == value ? theme.accent : theme.quiet)
+                        .padding(.horizontal, 12).frame(height: 24).contentShape(Rectangle())
+                }
+                .buttonStyle(DesktopButtonStyle(theme: theme, selected: macHome == value))
+            }
+        }
+        .padding(3)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    /// Home on the Mac: one continuous document, a heading per day, today in front. Write in it like in any doc;
+    /// lines become items by the date and time rules, agents write into the same pages, and it copies out as text
+    /// or Markdown.
+    private var paperHome: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                PageToolbar(controller: pageController, theme: theme).fixedSize()
+                HStack(spacing: 8) {
+                    Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
+                        .accessibilityHidden(true)
+                    homeSwitch
+                    Spacer()
+                    Button {
+                        guard let text = pageController.textView?.textStorage else { return }
+                        let markdown = PageMarkdown.markdown(text).replacingOccurrences(of: "-  ", with: "- ")
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(markdown, forType: .string)
+                        announce(String(localized: "整份文档已复制为 Markdown"))
+                    } label: {
+                        Text("复制 Markdown").font(.system(size: 12, weight: .medium)).foregroundStyle(theme.quiet)
+                            .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(DesktopButtonStyle(theme: theme))
+                    .help("把整份文档复制成 Markdown，可以直接贴给 AI")
+                    Button { sheet = .settings } label: {
+                        Image(systemName: "gearshape").font(.system(size: 14, weight: .medium)).foregroundStyle(theme.quiet)
+                            .frame(width: 32, height: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(DesktopButtonStyle(theme: theme))
+                    .accessibilityLabel("设置")
+                }
+            }
+            .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+            ZStack(alignment: .top) {
+                Rectangle().fill(theme.line.opacity(0.6)).frame(height: 1)
+                if documentOrganizing { ProgressView().progressViewStyle(.linear).tint(theme.accent).frame(height: 2) }
+            }
+            .frame(height: 2)
+            ScrollView {
+                DayDocumentView(days: paperDays.map { documentDay($0) }, anchor: clock.today, theme: theme, actions: documentActions,
+                                controller: pageController, organizeRequest: organizeTick, rebuildRequest: pageRebuild,
+                                autofocus: true, minHeight: 600)
+                    .frame(maxWidth: 820)
+                    .padding(.horizontal, 40).padding(.top, 18).padding(.bottom, 240)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
     private func dayEditor(_ day: PlanDate) -> some View {
         #if DEBUG
         let started = Date.now
@@ -2243,7 +2325,10 @@ struct PlannerView: View {
             selectWorkspace(note.object as? Int ?? 0)
         case .asmoPageChanged:
             // An agent wrote on the page that is open: show it.
-            if let key = note.object as? String, documentDay?.key == key || editingDay?.key == key { pageRebuild += 1 }
+            if let key = note.object as? String,
+               documentDay?.key == key || editingDay?.key == key || (macHome == "paper" && paperDays.contains { $0.key == key }) {
+                pageRebuild += 1
+            }
         case .asmoDebugType:
             // Test input (Debug): written at the cursor of the open page, as if typed and followed by Return.
             if let text = note.object as? String { pageController.insert(text.trimmingCharacters(in: .newlines) + "\n") }

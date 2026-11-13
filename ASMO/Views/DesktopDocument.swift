@@ -173,6 +173,7 @@ struct DayDocumentView: NSViewRepresentable {
         view.coordinator = context.coordinator
         context.coordinator.view = view
         context.coordinator.rebuildRequest = rebuildRequest
+        context.coordinator.builtDark = theme.dark
         context.coordinator.autofocused = autofocus
         if autofocus || controller?.textView == nil { controller?.textView = view }
         context.coordinator.build(days, anchor: anchor)
@@ -202,6 +203,13 @@ struct DayDocumentView: NSViewRepresentable {
         if context.coordinator.organizeRequest != organizeRequest {
             context.coordinator.organizeRequest = organizeRequest
             DispatchQueue.main.async { context.coordinator.organize(includingCurrent: true) }
+        }
+        // The look changed (light ↔ dark): the text was drawn in the old ink, so draw it again.
+        if context.coordinator.builtDark != theme.dark {
+            context.coordinator.builtDark = theme.dark
+            context.coordinator.syncEdits()
+            context.coordinator.build(days, anchor: context.coordinator.anchor ?? anchor)
+            return
         }
         if context.coordinator.rebuildRequest != rebuildRequest {
             context.coordinator.rebuildRequest = rebuildRequest
@@ -316,6 +324,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     private var confirmed = Set<String>()
     var organizeRequest = 0
     var rebuildRequest = 0
+    /// The look the text was last drawn for.
+    var builtDark: Bool?
     var keyMonitor: Any?
     private var idleOrganize: DispatchWorkItem?
     private var organizingNow = false
@@ -414,6 +424,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             DispatchQueue.main.async { PerfLog.note("open→drawn", since: opened) }
         }
         #endif
+        // Once more when the window has laid the document out (the first try can come before it has its size).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.scroll(to: anchor) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.scroll(to: anchor)
             // Opening the card means starting to write: the cursor is ready on the empty line.
@@ -1161,6 +1173,15 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             var cursor = start + 1
             while cursor < list.count, !list[cursor].isHeading { last = list[cursor]; cursor += 1 }
             view.setSelectedRange(NSRange(location: last.range.location + (last.id == nil ? max(0, last.range.length - 1) : last.range.length), length: 0))
+            // In a long document (many days), bring the day's heading to the top of the window.
+            if let layout = view.layoutManager, let container = view.textContainer, let clip = view.enclosingScrollView?.contentView {
+                layout.ensureLayout(for: container)
+                let glyphs = layout.glyphRange(forCharacterRange: list[start].range, actualCharacterRange: nil)
+                let top = layout.boundingRect(forGlyphRange: glyphs, in: container).minY + view.textContainerInset.height
+                if clip.bounds.height > 0, view.bounds.height > clip.bounds.height {
+                    view.scrollToVisible(NSRect(x: 0, y: max(0, top - 14), width: 1, height: clip.bounds.height))
+                }
+            }
         }
     }
 }
