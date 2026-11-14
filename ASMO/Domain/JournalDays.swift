@@ -18,7 +18,11 @@ enum JournalDays {
         }.filter { (1...9999).contains($0.year) }
     }
 
+    /// "2026-11-14" → that day; "2027-01" → the month (a plan for sometime that month).
     static func date(forKey key: String) -> PlanDate? {
+        if let parts = key.match(#"^(\d{4})-(\d{2})$"#), let year = Int(parts[1]), let month = Int(parts[2]), (1...12).contains(month) {
+            return PlanDate(year: year, month: month, day: nil)
+        }
         guard let parts = key.match(#"^(\d{4})-(\d{2})-(\d{2})$"#),
               let year = Int(parts[1]), let month = Int(parts[2]), let day = Int(parts[3]) else { return nil }
         return PlanDate(year: year, month: month, day: day)

@@ -23,8 +23,11 @@ struct PlanDate: Codable, Hashable, Comparable, Sendable {
         self == previous ? current : self
     }
 
+    /// The order of `key` (a month before its days), then the time; compared as numbers (formatting keys made
+    /// sorting years of days slow).
     static func < (lhs: Self, rhs: Self) -> Bool {
-        (lhs.key, lhs.hour ?? -1, lhs.minute ?? -1) < (rhs.key, rhs.hour ?? -1, rhs.minute ?? -1)
+        (lhs.year, lhs.month, lhs.day ?? 0, lhs.hour ?? -1, lhs.minute ?? -1)
+            < (rhs.year, rhs.month, rhs.day ?? 0, rhs.hour ?? -1, rhs.minute ?? -1)
     }
 
     static func from(_ date: Date, calendar: Calendar, includeTime: Bool = false) -> Self {

@@ -7,9 +7,17 @@ import SwiftUI
 
 /// One line that stands for a stored item.
 struct DocLine: Equatable {
-    enum Kind: String { case task, routine, event }
+    enum Kind: String {
+        case task, routine, event
+        /// A birthday, anniversary or holiday (every year).
+        case occasion
+        /// A line of the imported history (石墨), as it was written that day.
+        case archive
+        /// Shown for what it is, never written from the page: calendar events, important dates, the history.
+        var readOnly: Bool { self == .event || self == .occasion || self == .archive }
+    }
     var kind: Kind
-    /// Task UUID, "routineUUID|dayKey", or event id.
+    /// Task UUID, "routineUUID|dayKey", event id, "occasion-…" or "archive-…".
     var id: String
     var depth = 0
     var time: String?
@@ -164,6 +172,10 @@ struct DayDocumentView: NSViewRepresentable {
     /// The page lives inside the 逐日 card: no scroll view of its own, it grows with what's written.
     func makeNSView(context: Context) -> DocTextView {
         let view = DocTextView(frame: .zero)
+        // Every change to the text (typing, drawing, organizing) counts, so a measured height is never stale.
+        let coordinator = context.coordinator
+        NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: view.textStorage,
+                                               queue: nil) { [weak coordinator] _ in coordinator?.edits &+= 1 }
         view.isRichText = true
         view.importsGraphics = true
         view.allowsUndo = true
@@ -193,10 +205,17 @@ struct DayDocumentView: NSViewRepresentable {
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: DocTextView, context: Context) -> CGSize? {
         let width = proposal.width ?? 600
         guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
+        // Measuring lays out the whole page (years of history): only again when the text or the width changed.
+        let coordinator = context.coordinator
+        if let last = coordinator.measured, last.width == width, last.edits == coordinator.edits, last.min == minHeight {
+            return CGSize(width: width, height: last.height)
+        }
         container.containerSize = NSSize(width: max(60, width - view.textContainerInset.width * 2), height: .greatestFiniteMagnitude)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).height
-        return CGSize(width: width, height: max(minHeight, ceil(used + view.textContainerInset.height * 2 + 8)))
+        let height = max(minHeight, ceil(used + view.textContainerInset.height * 2 + 8))
+        coordinator.measured = (width, coordinator.edits, minHeight, height)
+        return CGSize(width: width, height: height)
     }
 
     func updateNSView(_ view: DocTextView, context: Context) {
@@ -228,6 +247,12 @@ struct DayDocumentView: NSViewRepresentable {
         }
         // Midnight passed: 今天 / 明天 move on, and the writer stays where they are.
         if let today = days.first(where: \.isToday)?.day, let built = context.coordinator.builtToday, built != today {
+            context.coordinator.rebuildInPlace(days)
+            return
+        }
+        // Days came or went (the history finished loading, an item landed on a day not on the paper yet):
+        // draw again, keeping the reader's place.
+        if days.map(\.day) != context.coordinator.builtDays {
             context.coordinator.rebuildInPlace(days)
             return
         }
@@ -371,6 +396,23 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     private var kinds: [String: DocLine.Kind] = [:]
     private var lineDays: [String: PlanDate] = [:]
     private var applying = false
+    /// An edit moved off a heading or read-only line is being made: let it through.
+    private var redirecting = false
+    /// Text typed on a heading, waiting to be put on the day's line.
+    private var redirectBuffer: String?
+    /// The page is being saved to the store.
+    private var syncing = false
+    /// The days drawn, in order: when the list changes the page is drawn again.
+    var builtDays: [PlanDate] = []
+    /// Changes to the text so far, and the height last measured for it.
+    var edits = 0
+    var measured: (width: CGFloat, edits: Int, min: CGFloat, height: CGFloat)?
+    /// What the page was last brought up to date with.
+    private var reconciled: [DocDay] = []
+    /// Days that had a saved page when drawn (emptying one must still be saved).
+    private var daysWithNotes = Set<PlanDate>()
+    /// Heading keys already read back into days.
+    private var dayKeys: [String: PlanDate?] = [:]
     /// Item ids the stored data has shown at least once. A line is only removed for a missing item when the
     /// item was confirmed before — a line just written may be ahead of the data refresh.
     private var confirmed = Set<String>()
@@ -451,22 +493,50 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     /// like the "今天" label at midnight, is above it) and the scroll position stays.
     func rebuildInPlace(_ days: [DocDay]) {
         guard let view, let storage = view.textStorage else { return }
+        // Asked while the page is being saved (the store answered right away): draw once the save is done.
+        if syncing {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let latest = self.parent.days
+                if latest.map(\.day) != self.builtDays { self.rebuildInPlace(latest) }
+            }
+            return
+        }
         syncEdits()
         let cursor = view.selectedRange().location
         let fromEnd = storage.length - cursor
         // The line the cursor is in (its text and day) and how far into it: found again after drawing.
         let before = paragraphs()
         let here = before.first { $0.range.location <= cursor && cursor <= $0.range.location + ($0.text as NSString).length }
-        let visible = view.enclosingScrollView?.contentView.bounds.origin
+        // What's at the top of the window, and how far below the top: found again after drawing, so days added
+        // above (the history) don't move what the reader is looking at.
+        let clip = view.enclosingScrollView?.contentView
+        var topLine: (paragraph: Paragraph, offset: CGFloat)?
+        if let clip, let layout = view.layoutManager, let container = view.textContainer {
+            let point = NSPoint(x: 1, y: clip.bounds.minY - view.textContainerInset.height + 1)
+            let index = layout.characterIndex(for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil)
+            if let found = before.last(where: { $0.range.location <= index }) {
+                let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: found.range.location, length: 0), actualCharacterRange: nil)
+                let y = layout.lineFragmentRect(forGlyphAt: min(glyphs.location, max(0, layout.numberOfGlyphs - 1)), effectiveRange: nil).minY
+                topLine = (found, clip.bounds.minY - (y + view.textContainerInset.height))
+            }
+        }
         let hadFocus = view.window?.firstResponder === view
         build(days, anchor: anchor ?? days.first?.day ?? PlanDate.from(.now, calendar: .current), scrolls: false)
+        let after = paragraphs()
         var location = max(0, min(storage.length, storage.length - fromEnd))
-        if let here, let again = paragraphs().first(where: { $0.text == here.text && $0.day == here.day && !$0.isHeading }) {
+        if let here, let again = after.first(where: { $0.text == here.text && $0.day == here.day && $0.isHeading == here.isHeading }) {
             location = min(storage.length, again.range.location + cursor - here.range.location)
         }
+        applying = true
         view.setSelectedRange(NSRange(location: location, length: 0))
-        if let visible, let clip = view.enclosingScrollView?.contentView {
-            clip.scroll(to: visible)
+        applying = false
+        if let clip, let topLine, let layout = view.layoutManager, let container = view.textContainer,
+           let again = after.first(where: { $0.text == topLine.paragraph.text && $0.day == topLine.paragraph.day && $0.isHeading == topLine.paragraph.isHeading }) {
+            layout.ensureLayout(for: container)
+            let glyphs = layout.glyphRange(forCharacterRange: NSRange(location: again.range.location, length: 0), actualCharacterRange: nil)
+            let y = layout.lineFragmentRect(forGlyphAt: min(glyphs.location, max(0, layout.numberOfGlyphs - 1)), effectiveRange: nil).minY
+            clip.scroll(to: NSPoint(x: clip.bounds.minX, y: max(0, y + view.textContainerInset.height + topLine.offset)))
             view.enclosingScrollView?.reflectScrolledClipView(clip)
         }
         if hadFocus { view.window?.makeFirstResponder(view) }
@@ -482,6 +552,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         defer { applying = false }
         let text = NSMutableAttributedString()
         drawn = [:]
+        builtDays = days.map(\.day)
+        daysWithNotes = Set(days.filter { $0.notes != nil }.map(\.day))
+        reconciled = days
         for day in days {
             confirmed.formUnion(day.lines.map(\.id))
             text.append(heading(day))
@@ -572,6 +645,12 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         case .event:
             result.append(NSAttributedString(string: "◆ ", attributes: base.merging([.foregroundColor: accent]) { $1 }))
             base[.foregroundColor] = quiet
+        case .occasion:
+            result.append(NSAttributedString(string: "✦ ", attributes: base.merging([.foregroundColor: accent]) { $1 }))
+            base[.foregroundColor] = accent
+        case .archive:
+            // The history reads like what was written that day: plain text, a little quieter than today's.
+            base[.foregroundColor] = quiet
         case .task, .routine:
             // While writing, items are plain bullets (sub-bullets by depth), like any list in a doc; they become
             // checkboxes once the day is frozen. The bullet is marked so it's never read as part of the title.
@@ -657,7 +736,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             location = NSMaxRange(range)
             let start = range.location
             if let key = storage.attribute(.asmoDay, at: start, effectiveRange: nil) as? String {
-                currentDay = JournalDays.date(forKey: key)
+                if let known = dayKeys[key] { currentDay = known } else {
+                    currentDay = JournalDays.date(forKey: key)
+                    dayKeys[key] = currentDay
+                }
                 result.append(Paragraph(range: range, day: currentDay, isHeading: true, id: nil, kind: nil, depth: 0,
                                         text: "", isNote: false))
                 continue
@@ -685,6 +767,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             }
             visible = visible.trimmingCharacters(in: .whitespacesAndNewlines)
             if kind == .event, visible.hasPrefix("◆") { visible = String(visible.dropFirst()).trimmed }
+            if kind == .occasion, visible.hasPrefix("✦") { visible = String(visible.dropFirst()).trimmed }
             let note = storage.attribute(.asmoNote, at: start, effectiveRange: nil) != nil
             result.append(Paragraph(range: range, day: currentDay, isHeading: false, id: id, kind: kind, depth: depth,
                                     text: visible, isNote: note))
@@ -736,6 +819,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         defer { PerfLog.note("syncEdits", since: started) }
         #endif
         let list = paragraphs()
+        let version = edits
+        syncing = true
+        defer { syncing = false }
         var present = Set<String>()
         let cursor = view.selectedRange().location
         for (index, paragraph) in list.enumerated() where !paragraph.isHeading {
@@ -746,7 +832,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 removedHere[id] = nil
                 if parent.actions.restore(id) { kinds[id] = kind; lineDays[id] = day }
             }
-            guard kind != .event else { continue }
+            guard !kind.readOnly else { continue }
             if paragraph.text.isEmpty {
                 // An emptied item line that the cursor has left: the item is gone.
                 if !NSLocationInRange(cursor, paragraph.range) || cursor == NSMaxRange(paragraph.range) {
@@ -770,7 +856,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             }
             parent.actions.strike(line, day, parts.contains("s"))
         }
-        for (id, kind) in kinds where !present.contains(id) && kind != .event && confirmed.contains(id) {
+        for (id, kind) in kinds where !present.contains(id) && !kind.readOnly && confirmed.contains(id) {
             if let day = lineDays[id] {
                 parent.actions.delete(DocLine(kind: kind, id: id, title: ""), day)
                 removedHere[id] = .now
@@ -779,7 +865,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             drawn[id] = nil
             lineDays[id] = nil
         }
-        saveNotes(list)
+        // The store's answers can redraw the page meanwhile: then read it again.
+        saveNotes(edits == version ? list : paragraphs())
     }
 
     /// The page's own inks (both looks): never saved as a line's color.
@@ -871,6 +958,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         guard let storage = view?.textStorage else { return }
         var byDay: [PlanDate: NSMutableAttributedString] = [:]
         for paragraph in list where !paragraph.isHeading && paragraph.id == nil && paragraph.day != nil {
+            guard NSMaxRange(paragraph.range) <= storage.length else { return }
             guard !paragraph.text.isEmpty || containsAttachment(paragraph.range) else { continue }
             let piece = storage.attributedSubstring(from: paragraph.range)
             // NSMutableAttributedString is a class: store the instance, don't mutate a temporary default.
@@ -878,11 +966,16 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             text.append(piece)
             byDay[paragraph.day!] = text
         }
+        // Each day's unorganized lines, gathered in one pass (years of history are thousands of days).
+        var pendingByDay: [PlanDate: [String]] = [:]
+        for paragraph in list where !paragraph.isHeading && paragraph.id == nil && !paragraph.isNote && !paragraph.text.isEmpty {
+            if let day = paragraph.day { pendingByDay[day, default: []].append(Self.stripMarker(paragraph.text)) }
+        }
         for day in Set(list.compactMap(\.day)) {
             let text = byDay[day]
-            let pendingNow = list.filter { $0.day == day && !$0.isHeading && $0.id == nil && !$0.isNote && !$0.text.isEmpty }
-                .map { Self.stripMarker($0.text) }
-            // Unchanged since the last save: nothing to encode or write.
+            let pendingNow = pendingByDay[day] ?? []
+            // Unchanged since the last save: nothing to encode or write. A day never written in stays unwritten.
+            if savedNotes[day] == nil, text == nil, pendingNow.isEmpty, !daysWithNotes.contains(day) { savedNotes[day] = (nil, []); continue }
             if let last = savedNotes[day], last.pending == pendingNow,
                (last.text == nil && text == nil) || (text.map { last.text?.isEqual(to: $0) ?? false } ?? false) { continue }
             savedNotes[day] = (text?.copy() as? NSAttributedString, pendingNow)
@@ -892,8 +985,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 return try? neutral.data(from: NSRange(location: 0, length: neutral.length),
                              documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd])
             }
-            let pending = list.filter { $0.day == day && !$0.isHeading && $0.id == nil && !$0.isNote && !$0.text.isEmpty }
-                .map { Self.stripMarker($0.text) }
+            let pending = pendingNow
             parent.actions.saveNotes(day, data, pending)
         }
     }
@@ -1170,25 +1262,107 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         }
     }
 
-    /// Day headings and calendar events can't be edited in the document.
-    func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
-        guard !applying, let storage = textView.textStorage else { return true }
+    /// The parts of the page that are fixed: each day's heading (with the line breaks on both sides, so it can't be
+    /// merged into the line above or below) and read-only lines (events, important dates, the history).
+    /// `readOnly` tells the two apart: typing that lands on a heading goes to that day's first line instead.
+    struct Fixed { var range: NSRange; var heading: Bool }
+
+    func fixedRanges(near range: NSRange, in storage: NSTextStorage) -> [Fixed] {
         let string = storage.string as NSString
-        var location = range.location
-        let end = max(range.location, NSMaxRange(range))
-        while location <= end, location < string.length {
+        guard string.length > 0 else { return [] }
+        var result: [Fixed] = []
+        var location = string.paragraphRange(for: NSRange(location: min(max(0, range.location - 1), string.length - 1), length: 0)).location
+        let end = min(string.length, NSMaxRange(range) + 1)
+        while location < string.length, location <= end {
             let paragraph = string.paragraphRange(for: NSRange(location: location, length: 0))
-            let protected = storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil
-                || (storage.attribute(.asmoKind, at: paragraph.location, effectiveRange: nil) as? String) == DocLine.Kind.event.rawValue
-            if protected {
-                let touches = range.length == 0
-                    ? (range.location > paragraph.location && range.location < NSMaxRange(paragraph))
-                    : NSIntersectionRange(range, paragraph).length > 0
-                if touches { NSSound.beep(); return false }
+            let heading = storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil
+            let kind = (storage.attribute(.asmoKind, at: paragraph.location, effectiveRange: nil) as? String).flatMap(DocLine.Kind.init)
+                ?? (paragraph.length > 1 ? (storage.attribute(.asmoKind, at: NSMaxRange(paragraph) - 2, effectiveRange: nil) as? String).flatMap(DocLine.Kind.init) : nil)
+            if heading || kind?.readOnly == true {
+                let start = max(0, paragraph.location - 1)
+                result.append(Fixed(range: NSRange(location: start, length: NSMaxRange(paragraph) - start), heading: heading))
             }
             location = NSMaxRange(paragraph)
             if paragraph.length == 0 { break }
         }
+        return result
+    }
+
+    /// Headings and read-only lines never change, whatever the edit: an edit across them changes everything else,
+    /// and typing that would land inside them lands next to them. Nothing beeps and nothing is refused.
+    func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+        guard !applying, !redirecting, let storage = textView.textStorage else { return true }
+        if let replacementString, redirectBuffer != nil, range.length == 0 { redirectBuffer! += replacementString; return false }
+        let fixed = fixedRanges(near: range, in: storage)
+        let text = replacementString ?? ""
+        if range.length == 0 {
+            // Inserting at a fixed range's first position is the end of the line above: fine.
+            guard let hit = fixed.first(where: { range.location > $0.range.location && range.location < NSMaxRange($0.range) }) else {
+                return finishChange(textView, range: range, replacement: replacementString)
+            }
+            guard !text.isEmpty else { return false }
+            // Keys typed before the moved text lands join it (fast typing stays in order, on one line).
+            if redirectBuffer != nil { redirectBuffer! += text; return false }
+            redirectBuffer = text
+            let string = storage.string as NSString
+            let end = min(NSMaxRange(hit.range), string.length)
+            // On a date: write on the day's first line. On an event or the history: on a new line below it.
+            let target = hit.heading ? end : (end > 0 && string.character(at: end - 1) == 10 ? end - 1 : end)
+            // Under a heading, a line of its own unless the day's first line is empty (never glued onto an item).
+            let nextEmpty = target >= string.length || string.character(at: target) == 10
+            let heading = hit.heading
+            // Made right after AppKit's question, not inside it.
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self else { return }
+                let typed = self.redirectBuffer ?? ""
+                self.redirectBuffer = nil
+                guard let textView, let storage = textView.textStorage, target <= storage.length, !typed.isEmpty else { return }
+                let insert = heading ? (nextEmpty ? typed : typed + "\n") : "\n" + typed
+                let caret = target + (insert as NSString).length - (heading && !nextEmpty ? 1 : 0)
+                self.redirecting = true
+                textView.insertText(NSAttributedString(string: insert, attributes: self.bodyAttributes),
+                                    replacementRange: NSRange(location: target, length: 0))
+                textView.setSelectedRange(NSRange(location: min(caret, storage.length), length: 0))
+                self.redirecting = false
+            }
+            return false
+        }
+        let hits = fixed.filter { NSIntersectionRange(range, $0.range).length > 0 }
+        guard !hits.isEmpty else { return finishChange(textView, range: range, replacement: replacementString) }
+        // What's left of the edit once the fixed parts are taken out.
+        var pieces: [NSRange] = []
+        var cursor = range.location
+        for hit in hits.sorted(by: { $0.range.location < $1.range.location }) {
+            if hit.range.location > cursor { pieces.append(NSRange(location: cursor, length: hit.range.location - cursor)) }
+            cursor = max(cursor, NSMaxRange(hit.range))
+        }
+        if cursor < NSMaxRange(range) { pieces.append(NSRange(location: cursor, length: NSMaxRange(range) - cursor)) }
+        // Only fixed text selected (part of a date): typing over it is typing on it.
+        if pieces.isEmpty, let last = hits.last, last.range.length > 1 {
+            return self.textView(textView, shouldChangeTextIn: NSRange(location: last.range.location + 1, length: 0), replacementString: replacementString)
+        }
+        let target = pieces.first?.location ?? min(NSMaxRange(hits.last!.range), storage.length)
+        DispatchQueue.main.async { [weak self, weak textView] in
+            guard let self, let textView, let storage = textView.textStorage,
+                  pieces.allSatisfy({ NSMaxRange($0) <= storage.length }) else { return }
+            let undo = textView.undoManager
+            undo?.beginUndoGrouping()
+            self.redirecting = true
+            for piece in pieces.reversed() { textView.insertText("", replacementRange: piece) }
+            if !text.isEmpty {
+                textView.insertText(NSAttributedString(string: text, attributes: self.bodyAttributes),
+                                    replacementRange: NSRange(location: min(target, storage.length), length: 0))
+            } else {
+                textView.setSelectedRange(NSRange(location: min(target, storage.length), length: 0))
+            }
+            self.redirecting = false
+            undo?.endUndoGrouping()
+        }
+        return false
+    }
+
+    /// An ordinary edit: as-you-type Markdown and clean typing attributes.
+    private func finishChange(_ textView: NSTextView, range: NSRange, replacement replacementString: String?) -> Bool {
         cleanTypingAttributes(textView)
         if let replacementString, range.length == 0, markdownShortcut(textView, at: range.location, typed: replacementString) {
             return false
@@ -1269,21 +1443,45 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         textView.typingAttributes = attributes
     }
 
-    func textViewDidChangeSelection(_ notification: Notification) {
-        guard let textView = notification.object as? NSTextView, let storage = textView.textStorage, !applying else { return }
-        // The date heading isn't writable: keep the cursor and selections below it.
-        let selection = textView.selectedRange()
+    /// The cursor never stands on a date: a click on a heading puts it at the start of that day's writing, and
+    /// moving up past a heading goes on to the end of the day before. (Selections can cross headings freely, to
+    /// copy; what an edit can't change is decided in shouldChangeTextIn.)
+    func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
+                  toCharacterRange new: NSRange) -> NSRange {
+        guard !applying, new.length == 0, let storage = textView.textStorage, storage.length > 0 else { return new }
         let string = storage.string as NSString
-        if selection.location < string.length {
-            let paragraph = string.paragraphRange(for: NSRange(location: selection.location, length: 0))
-            if storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil {
-                let start = NSMaxRange(paragraph)
-                let end = max(start, NSMaxRange(selection))
-                applying = true
-                textView.setSelectedRange(NSRange(location: min(start, string.length), length: min(end, string.length) - min(start, string.length)))
-                applying = false
-            }
+        let probe = min(new.location, string.length - 1)
+        let paragraph = string.paragraphRange(for: NSRange(location: probe, length: 0))
+        guard new.location < string.length || string.character(at: string.length - 1) != 10,
+              storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil,
+              NSLocationInRange(new.location, paragraph) || new.location == string.length else { return new }
+        let below = min(NSMaxRange(paragraph), string.length)
+        // Only ↑ / ← continue up to the day before; a click (or anything else) lands below the date.
+        let event = NSApp.currentEvent
+        let arrowUp = event?.type == .keyDown && [123, 126, 115, 116].contains(event?.keyCode ?? 0)
+        let goingUp = arrowUp && new.location < old.location
+        if goingUp, paragraph.location > 0 { return NSRange(location: paragraph.location - 1, length: 0) }
+        if event?.type == .keyDown { return NSRange(location: below, length: 0) }
+        // A click on a date: write in that day, on its writing line (the empty line at the end of its section),
+        // never at the start of its first item.
+        var line = below
+        var last = below
+        while line < string.length {
+            let next = string.paragraphRange(for: NSRange(location: line, length: 0))
+            if storage.attribute(.asmoDay, at: next.location, effectiveRange: nil) != nil { break }
+            last = next.location
+            line = NSMaxRange(next)
+            if next.length == 0 { break }
         }
+        let writing = string.paragraphRange(for: NSRange(location: min(last, max(0, string.length - 1)), length: 0))
+        let empty = string.substring(with: writing).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && storage.attribute(.asmoLine, at: writing.location, effectiveRange: nil) == nil
+        if empty { return NSRange(location: writing.location, length: 0) }
+        return NSRange(location: below, length: 0)
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        guard let textView = notification.object as? NSTextView, !applying else { return }
         cleanTypingAttributes(textView)
         // The cursor moved to another day: what was written in the day it left is organized now.
         if !parent.organizeWhenIdle {
@@ -1323,6 +1521,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             syncEdits()
             return
         }
+        // Nothing the page shows changed (most updates: a timer, the window, another view): nothing to do.
+        // Reading a long page back costs real time, so don't.
+        if days == reconciled { return }
+        reconciled = days
         let list = paragraphs()
         let editing = view.window?.firstResponder === view ? view.selectedRange() : nil
         var wanted: [String: (DocLine, PlanDate)] = [:]
@@ -1343,7 +1545,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                     storage.deleteCharacters(in: paragraph.range)
                     changed = true
                     drawn[id] = nil
-                } else if drawn[id] != line.signature && !underCursor {
+                } else if drawn[id] != line.signature && underCursor {
+                    // Left alone while being written in: look again next time.
+                    reconciled = []
+                } else if drawn[id] != line.signature {
                     var redrawn = line
                     redrawn.depth = paragraph.depth
                     storage.replaceCharacters(in: paragraph.range, with: render(redrawn, day: day))

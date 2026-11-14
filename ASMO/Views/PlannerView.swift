@@ -992,21 +992,55 @@ struct PlannerView: View {
 
     #if os(macOS)
     /// The day being written, as a page over the calendar.
-    /// The days on the paper: today and the two weeks ahead, plus earlier days only where something was written
-    /// (empty past days would just be headings to scroll past), and the day the paper was asked to show.
+    /// The days on the paper: today and the two weeks ahead, and every other day that has anything on it — items,
+    /// a page, the imported history, an old day note — however far back or ahead, plus the month plans
+    /// ("2027 年 1 月") and the important dates of the coming month. The paper shows what the calendar shows.
     private var paperDays: [PlanDate] {
+        #if DEBUG
+        let started = Date.now
+        defer { PerfLog.note("paperDays", since: started) }
+        #endif
         // Read through lastKnownToday so midnight passing redraws the document.
         let today = max(lastKnownToday, clock.today)
         var days = Set((0...14).compactMap { clock.offset(days: $0) })
-        let since = clock.offset(days: -60)?.key ?? today.key
         for task in tasks where !task.calendarLinked {
-            if let day = task.schedule?.dayOnly, day.day != nil, day.key >= since, day.key < today.key { days.insert(day) }
+            if let day = task.schedule?.dayOnly { days.insert(day) }
         }
-        for page in dayPages where page.dayKey >= since && page.dayKey < today.key {
+        for page in dayPages {
             if let day = JournalDays.date(forKey: page.dayKey) { days.insert(day) }
         }
-        if let paperFocus { days.insert(paperFocus) }
-        return days.sorted()
+        for note in notes where !note.body.trimmed.isEmpty {
+            if let day = JournalDays.date(forKey: note.dayKey) { days.insert(day) }
+        }
+        // History days with something written (an imported "11.3:" with nothing after it is just a date).
+        for (day, entries) in archivedDays where entries.contains(where: { !$0.entry.body.trimmed.isEmpty }) { days.insert(day) }
+        let calendar = clock.calendar
+        let gregorian = Set(importantDates.filter { $0.rule.system == .gregorian }.map { $0.rule.month * 100 + $0.rule.day })
+        let lunar = importantDates.filter { $0.rule.system != .gregorian }
+        for offset in 15...31 {
+            guard let day = clock.offset(days: offset) else { continue }
+            if gregorian.contains(day.month * 100 + (day.day ?? 0)) || lunar.contains(where: { $0.rule.matches(day, calendar: calendar) }) {
+                days.insert(day)
+            }
+        }
+        days.insert(today)
+        // The past is shown back to a point (a long page is slow to edit); 更早的记录 moves the point back.
+        let cutoff = clock.offset(days: -paperHistory) ?? today
+        let shown = days.filter { $0.day == nil || $0 >= cutoff }
+        var result = Set(shown)
+        if let paperFocus { result.insert(paperFocus) }
+        paperOlder = days.count - shown.count
+        return result.sorted()
+    }
+
+    /// Past days on the paper (more with each 更早的记录).
+    @State private var paperHistory = 60
+    /// How many earlier days with something on them aren't on the paper (written while computing paperDays).
+    private final class Count { var value = 0 }
+    @State private var paperOlderBox = Count()
+    private var paperOlder: Int {
+        get { paperOlderBox.value }
+        nonmutating set { paperOlderBox.value = newValue }
     }
 
     /// The logo and 文档 | 日历: the same place in both views.
@@ -1078,7 +1112,20 @@ struct PlannerView: View {
             }
             .frame(height: 2)
             ScrollView {
-                DayDocumentView(days: paperDays.map { documentDay($0) }, anchor: paperFocus ?? clock.today, theme: theme,
+                let days = documentDays(paperDays)
+                if paperOlder > 0 {
+                    Button {
+                        paperHistory += 120
+                    } label: {
+                        Label(String(localized: "更早的记录 · 还有 \(paperOlder) 天"), systemImage: "chevron.up")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(theme.quiet)
+                            .padding(.horizontal, 12).frame(height: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(DesktopButtonStyle(theme: theme))
+                    .help("把再往前四个月的记录（包括导入的石墨历史）放到文档里")
+                    .padding(.top, 14)
+                }
+                DayDocumentView(days: days, anchor: paperFocus ?? clock.today, theme: theme,
                                 actions: documentActions, controller: pageController, organizeRequest: organizeTick,
                                 rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false)
                     .frame(maxWidth: 820)
@@ -2699,17 +2746,69 @@ struct PlannerView: View {
         }
     }
 
-    private func documentDay(_ day: PlanDate) -> DocDay {
+    /// Everything the paper's days are drawn from, looked up once per drawing (years of history means
+    /// thousands of days; each one should only touch its own things).
+    private struct DocIndex {
+        var tasks: [PlanDate: [TaskRecord]] = [:]
+        var gregorian: [Int: [ImportantDateRecord]] = [:]
+        var lunar: [ImportantDateRecord] = []
+        var marks: [String: RoutineMark] = [:]
+        var notes: [String: DayNote] = [:]
+        var pages: [String: Data] = [:]
+        var reminders: [PlanDate: [SystemTask]] = [:]
+        var promoted = Set<String>()
+        var edits: [String: String] = [:]
+        /// Important dates are shown from this day on.
+        var since = PlanDate(year: 1, month: 1, day: 1)
+    }
+
+    private func docIndex() -> DocIndex {
+        var index = DocIndex()
+        for task in tasks where !task.calendarLinked {
+            if let day = task.schedule?.dayOnly { index.tasks[day, default: []].append(task) }
+        }
+        for record in importantDates {
+            if record.rule.system == .gregorian { index.gregorian[record.rule.month * 100 + record.rule.day, default: []].append(record) }
+            else { index.lunar.append(record) }
+        }
+        index.marks = Dictionary(routineMarks.map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
+        index.notes = Dictionary(notes.filter { !$0.body.trimmed.isEmpty }.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
+        index.pages = Dictionary(dayPages.compactMap { page in page.rtfd.map { (page.dayKey, $0) } }, uniquingKeysWith: { first, _ in first })
+        for reminder in system.reminders where reminder.asmoID == nil {
+            if let day = reminder.schedule?.dayOnly { index.reminders[day, default: []].append(reminder) }
+        }
+        index.promoted = Set(tasks.compactMap(\.importKey))
+        index.edits = Dictionary(journalEdits.map { ($0.recordKey, $0.body) }, uniquingKeysWith: { newest, _ in newest })
+        index.since = clock.offset(days: -60) ?? clock.today
+        return index
+    }
+
+    private func documentDays(_ days: [PlanDate]) -> [DocDay] {
         #if DEBUG
         let started = Date.now
-        defer { PerfLog.note("documentDay", since: started) }
+        defer { PerfLog.note("documentDays", since: started) }
         #endif
+        let index = docIndex()
+        return days.map { documentDay($0, index: index) }
+    }
+
+    private func documentDay(_ day: PlanDate) -> DocDay { documentDay(day, index: docIndex()) }
+
+    private func documentDay(_ day: PlanDate, index: DocIndex) -> DocDay {
         let today = clock.today
         let calendar = clock.calendar
-        let delta = dayDelta(today, day) ?? 0
-        let relative = delta == 0 ? String(localized: " · 今天") : delta == 1 ? String(localized: " · 明天") : delta == -1 ? String(localized: " · 昨天") : ""
-        let heading = String(localized: "\(day.month) 月 \(day.day ?? 1) 日  \(journalWeekday(day))\(relative)")
-        let dayTasks = tasks.filter { $0.schedule?.dayOnly == day && !$0.calendarLinked }
+        let heading: String
+        if day.day == nil {
+            // A month's plan: things for "sometime in January".
+            heading = day.year == today.year ? String(localized: "\(day.month) 月 · 这个月里") : String(localized: "\(String(day.year)) 年 \(day.month) 月 · 这个月里")
+        } else {
+            let delta = dayDelta(today, day) ?? 0
+            let relative = delta == 0 ? String(localized: " · 今天") : delta == 1 ? String(localized: " · 明天") : delta == -1 ? String(localized: " · 昨天") : ""
+            // Another year's days say which year.
+            let year = day.year == today.year ? "" : String(day.year) + " 年 "
+            heading = year + String(localized: "\(day.month) 月 \(day.day ?? 1) 日  \(journalWeekday(day))\(relative)")
+        }
+        let dayTasks = index.tasks[day] ?? []
         let ids = Set(dayTasks.map(\.id))
         func time(_ minute: Int?, end: Int?) -> String? {
             guard let minute else { return nil }
@@ -2725,26 +2824,72 @@ struct PlannerView: View {
                 .sorted { $0.createdAt < $1.createdAt }
                 .flatMap { family($0, depth: min(depth + 1, 3)) }
         }
-        // Top level: tasks, routines and calendar events in time order; untimed after.
+        // Top level: important dates first, then tasks, routines and calendar events in time order; untimed after;
+        // the imported history last.
         var top: [(minute: Int?, order: Date, lines: [DocLine])] = []
         for task in dayTasks where task.parentID == nil || !ids.contains(task.parentID!) {
             top.append((minute(task), task.createdAt, family(task, depth: 0)))
         }
+        guard day.day != nil else {
+            top.sort { ($0.minute ?? 10_000, $0.order) < ($1.minute ?? 10_000, $1.order) }
+            return DocDay(day: day, heading: heading, isToday: false, lines: top.flatMap(\.lines), notes: index.pages[day.key])
+        }
+        var occasionTitles = Set<String>()
+        // Birthdays and anniversaries from now on (on days of the old history they'd only be noise, and lunar
+        // dates cost a calendar conversion each).
+        let recent = day >= index.since
+        let candidates = recent ? (index.gregorian[day.month * 100 + (day.day ?? 0)] ?? []) + index.lunar : []
+        for record in candidates where record.rule.matches(day, calendar: calendar) && occasionTitles.insert(record.title).inserted {
+            top.append((-1, .distantPast, [DocLine(kind: .occasion, id: "occasion-\(record.id)", title: record.title)]))
+        }
         // Routines show on every day they repeat, the same as the day at rest (逐日 / frozen).
-        for instance in routineInstances(on: day) {
+        for instance in routineInstances(on: day, marks: index.marks) {
             let routine = instance.routine
             top.append((routine.startMinute, routine.createdAt,
                         [DocLine(kind: .routine, id: routine.id.uuidString + "|" + day.key,
                                  time: time(routine.startMinute, end: routine.endMinute), title: routine.title,
                                  done: instance.done, tag: RoutineParser.label(routine.weekdays))]))
         }
-        for event in (journalEvents.days[day] ?? []) where event.importantKind == nil && event.asmoID.map({ !ids.contains($0) }) ?? true {
+        for event in (journalEvents.days[day] ?? []) where event.asmoID.map({ !ids.contains($0) }) ?? true {
+            if event.importantKind != nil {
+                guard recent, occasionTitles.insert(event.title).inserted else { continue }
+                top.append((-1, event.start, [DocLine(kind: .occasion, id: "occasion-" + event.id, title: event.title)]))
+                continue
+            }
             let start = event.allDay ? nil : PlanDate.from(event.start, calendar: calendar, includeTime: true).minuteOfDay
             top.append((start, event.start, [DocLine(kind: .event, id: event.id, time: start.map { PlannerClockTime.label($0) },
                                                      title: event.title)]))
         }
+        // Apple Reminders made elsewhere: shown like events (they're checked off in Reminders or the calendar).
+        for reminder in index.reminders[day] ?? [] {
+            top.append((reminder.schedule?.minuteOfDay, .distantFuture,
+                        [DocLine(kind: .event, id: "reminder-" + reminder.id,
+                                 time: reminder.schedule?.minuteOfDay.map { PlannerClockTime.label($0) },
+                                 title: reminder.title, done: reminder.completed)]))
+        }
         top.sort { ($0.minute ?? 10_000, $0.order) < ($1.minute ?? 10_000, $1.order) }
-        return DocDay(day: day, heading: heading, isToday: day == today, lines: top.flatMap(\.lines), notes: pageData(day))
+        var lines = top.flatMap(\.lines)
+        // An old day note (from before pages) and the imported history, as written that day.
+        if let note = index.notes[day.key] {
+            for (index, text) in note.body.components(separatedBy: .newlines).map(\.trimmed).filter({ !$0.isEmpty }).enumerated() {
+                lines.append(DocLine(kind: .archive, id: "note-\(day.key)-\(index)", title: text))
+            }
+        }
+        if let history = archivedDays[day] {
+            let promoted = index.promoted
+            let edits = index.edits
+            var seen = Set(lines.map { $0.title.trimmed })
+            for item in history where !item.entry.body.trimmed.isEmpty && !promoted.contains(item.entry.id) {
+                let text = JournalArchiveText(edits[item.recordKey] ?? item.entry.body)
+                let key = text.text.trimmed
+                guard !key.isEmpty, seen.insert(key).inserted else { continue }
+                // One line on the page per line of the entry.
+                for (index, part) in text.text.components(separatedBy: .newlines).map(\.trimmed).filter({ !$0.isEmpty }).enumerated() {
+                    lines.append(DocLine(kind: .archive, id: "archive-\(item.recordKey)-\(index)", title: part, done: text.completed))
+                }
+            }
+        }
+        return DocDay(day: day, heading: heading, isToday: day == today, lines: lines, notes: index.pages[day.key])
     }
 
     private var documentActions: DocActions {
@@ -3164,7 +3309,7 @@ struct PlannerView: View {
             routine.startMinute = minute
             routine.endMinute = minute == nil ? nil : parsed.endMinute
             persist()
-        case .event:
+        case .event, .occasion, .archive:
             return
         }
     }
@@ -3456,9 +3601,12 @@ struct PlannerView: View {
     // MARK: Routines
 
     private func routineInstances(on day: PlanDate) -> [RoutineInstance] {
+        routineInstances(on: day, marks: Dictionary(routineMarks.map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) },
+                                                    uniquingKeysWith: { first, _ in first }))
+    }
+
+    private func routineInstances(on day: PlanDate, marks: [String: RoutineMark]) -> [RoutineInstance] {
         let calendar = clock.calendar
-        let marks = Dictionary(routineMarks.map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) },
-                               uniquingKeysWith: { first, _ in first })
         return routines.filter { $0.applies(to: day, calendar: calendar) }.compactMap { routine in
             let mark = marks[routine.id.uuidString + "|" + day.key]
             if mark?.skipped == true { return nil }
