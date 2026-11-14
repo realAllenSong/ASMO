@@ -39,7 +39,11 @@ struct ASMOApp: App {
         #endif
         #if os(macOS)
         // Coding agents reach the app through the `asmo` command, set up for them without any typing.
-        if case .success(let container) = storage { AgentBridge.start(container) }
+        if case .success(let container) = storage {
+            AgentBridge.start(container)
+            // Items kept in Apple Calendar and Reminders (the 逐日 calendar and list), both ways.
+            CalendarMirror.shared.start(container)
+        }
         Task.detached(priority: .utility) { AgentSetup.run() }
         Updater.shared.checkInBackground()
         #endif

@@ -196,7 +196,9 @@ enum NoteRule {
 #if os(macOS)
 struct DayDocumentView: NSViewRepresentable {
     let days: [DocDay]
+    /// The day the document opens on, scrolled to again whenever `jump` changes.
     let anchor: PlanDate
+    var jump = 0
     let theme: PlannerTheme
     let actions: DocActions
     /// Formatting toolbar hookup.
@@ -309,9 +311,22 @@ struct DayDocumentView: NSViewRepresentable {
         // draw again, keeping the reader's place.
         if days.map(\.day) != context.coordinator.builtDays {
             context.coordinator.rebuildInPlace(days)
+            jumpIfAsked(context)
             return
         }
         context.coordinator.reconcile(days)
+        jumpIfAsked(context)
+    }
+
+    /// 跳到日期 / 今天: once the day is on the page, bring it to the top.
+    private func jumpIfAsked(_ context: Context) {
+        guard context.coordinator.jumped != jump else { return }
+        context.coordinator.jumped = jump
+        let day = anchor
+        DispatchQueue.main.async {
+            context.coordinator.scroll(to: day)
+            context.coordinator.view?.window?.makeFirstResponder(context.coordinator.view)
+        }
     }
 }
 
@@ -577,6 +592,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     private var syncing = false
     /// The days drawn, in order: when the list changes the page is drawn again.
     var builtDays: [PlanDate] = []
+    /// The last 跳到日期 handled.
+    var jumped = 0
     /// Changes to the text so far, and the height last measured for it.
     var edits = 0
     var measured: (width: CGFloat, edits: Int, min: CGFloat, height: CGFloat)?

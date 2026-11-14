@@ -10,6 +10,14 @@ grep -E "error:|BUILD" "$derived.log" | head -20 || true
 grep -q "BUILD SUCCEEDED" "$derived.log" || { echo "build failed" >&2; exit 1; }
 built="$derived/Build/Products/Release/ASMO.app"
 [[ -d "$built" ]] || { echo "build failed" >&2; exit 1; }
+# Sign with this Mac's Apple Development certificate when there is one: macOS remembers permissions (Calendar,
+# Reminders) by the signer, so a stable signature keeps them across reinstalls. An ad-hoc build looks like a new
+# app every time and asks again.
+identity=$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 "Apple Development" | sed -E 's/.*"(.*)"/\1/')
+if [[ -n "$identity" ]]; then
+    codesign --force --deep --options runtime --entitlements Config/ASMO.Mac.entitlements --sign "$identity" "$built" > /dev/null 2>&1 \
+        && echo "Signed with $identity" || echo "Signing failed; keeping the ad-hoc build" >&2
+fi
 /usr/bin/pkill -x ASMO 2>/dev/null || true
 sleep 0.5
 if [[ -d /Applications/ASMO.app ]]; then

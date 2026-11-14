@@ -457,17 +457,8 @@ struct PlannerView: View {
             #if os(macOS)
             // Mac: the calendar is home; a day is written in its popup (DayEditorSheet). The month only redraws
             // when what it shows changed (opening a day, typing in it, the notice… leave it alone: no hitch).
-            ZStack {
-                if macHome == "paper" {
-                    paperHome
-                        .transition(.opacity.combined(with: .scale(scale: 0.99, anchor: .top)))
-                } else {
-                    CalendarHost(key: calendarKey) { desktopMonth }
-                        .equatable()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transition(.opacity.combined(with: .scale(scale: 0.99, anchor: .top)))
-                }
-            }
+            // The Mac is one document; seeing the month is Apple Calendar's job (the 逐日 calendar there).
+            paperHome
             #else
             // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
             NavigationStack {
@@ -1044,7 +1035,15 @@ struct PlannerView: View {
         let cutoff = clock.offset(days: -paperHistory) ?? today
         let shown = days.filter { $0.day == nil || $0 >= cutoff }
         var result = Set(shown)
-        if let paperFocus { result.insert(paperFocus) }
+        if let paperFocus {
+            // A day jumped to, with the written days around it (the history there reads in context).
+            result.insert(paperFocus)
+            if let low = clock.calendar.date(byAdding: .day, value: -10, to: paperFocus.date(in: clock.calendar) ?? .now),
+               let high = clock.calendar.date(byAdding: .day, value: 10, to: paperFocus.date(in: clock.calendar) ?? .now) {
+                let lo = PlanDate.from(low, calendar: clock.calendar), hi = PlanDate.from(high, calendar: clock.calendar)
+                result.formUnion(days.filter { $0.day != nil && $0 >= lo && $0 <= hi })
+            }
+        }
         paperOlder = days.count - shown.count
         return result.sorted()
     }
@@ -1064,9 +1063,54 @@ struct PlannerView: View {
         HStack(spacing: 10) {
             Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
                 .accessibilityHidden(true)
-            homeSwitch
+            jumpButton
         }
     }
+
+    /// Go to any day: a month to pick from (year and month arrows), and 今天.
+    @State private var jumping = false
+    @State private var jumpPick = Date.now
+
+    private var jumpButton: some View {
+        Button {
+            jumpPick = (paperFocus ?? clock.today).date(in: clock.calendar) ?? .now
+            jumping = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "calendar").font(.system(size: 12, weight: .medium))
+                Text("跳到日期").font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(theme.quiet)
+            .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+        }
+        .buttonStyle(DesktopButtonStyle(theme: theme))
+        .help("跳到某年某月某天 · 看日历请用苹果日历里的「逐日」")
+        .popover(isPresented: $jumping, arrowEdge: .bottom) {
+            VStack(spacing: 10) {
+                DatePicker("", selection: $jumpPick, displayedComponents: .date)
+                    .datePickerStyle(.graphical).labelsHidden()
+                    .onChange(of: jumpPick) { _, date in
+                        jumping = false
+                        jump(to: PlanDate.from(date, calendar: clock.calendar))
+                    }
+                HStack {
+                    Button("今天") { jumping = false; jump(to: clock.today) }
+                        .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(theme.accent)
+                    Spacer()
+                    Text("看日历：苹果日历里的「逐日」").font(.system(size: 11)).foregroundStyle(theme.quiet)
+                }
+            }
+            .padding(14).frame(width: 260)
+        }
+    }
+
+    private func jump(to day: PlanDate) {
+        paperFocus = day == clock.today ? nil : day.dayOnly
+        paperJump += 1
+    }
+
+    /// Counts jumps: the document scrolls to its anchor on each.
+    @State private var paperJump = 0
 
     /// 文档 | 日历.
     private var homeSwitch: some View {
@@ -1141,7 +1185,7 @@ struct PlannerView: View {
                     .help("把再往前四个月的记录（包括导入的石墨历史）放到文档里")
                     .padding(.top, 14)
                 }
-                DayDocumentView(days: days, anchor: paperFocus ?? clock.today, theme: theme,
+                DayDocumentView(days: days, anchor: paperFocus ?? clock.today, jump: paperJump, theme: theme,
                                 actions: documentActions, controller: pageController, organizeRequest: organizeTick,
                                 rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false)
                     .frame(maxWidth: 820)
@@ -2472,9 +2516,8 @@ struct PlannerView: View {
         switch note.name {
         case .asmoView:
             #if os(macOS)
-            let target = (note.object as? Int ?? 0) == 0 ? "paper" : "calendar"
-            if target == "paper" { paperFocus = nil }
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { macHome = target }
+            paperFocus = nil
+            paperJump += 1
             #else
             selectWorkspace(note.object as? Int ?? 0)
             #endif
@@ -2523,10 +2566,10 @@ struct PlannerView: View {
                     #endif
                     return
                 }
-                if text.trimmed == "paper" { paperFocus = nil; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return }
+                if text.trimmed == "paper" { jump(to: clock.today); return }
                 // "paperday:2026-11-20": what a double-click on that day in the calendar does.
                 if text.hasPrefix("paperday:"), let day = JournalDays.date(forKey: String(text.dropFirst(9)).trimmed) {
-                    paperFocus = day; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return
+                    jump(to: day); return
                 }
                 // "clock:86400": pretend it is that many seconds later (testing midnight); the day check follows.
                 #if DEBUG
@@ -4513,9 +4556,9 @@ struct PlannerView: View {
 
     private func showToday() {
         #if os(macOS)
-        if macHome == "paper" { paperFocus = nil; pageRebuild += 1; return }
-        if Self.calendarHome { monthDetail = nil; monthCursor = clock.today; selected = clock.today; return }
-        #endif
+        paperFocus = nil
+        paperJump += 1
+        #else
         if let current = editingDay {
             if current != clock.today { openDocument(clock.today) }
             return
@@ -4527,6 +4570,7 @@ struct PlannerView: View {
         } else {
             navigateAgenda(to: clock.today)
         }
+        #endif
     }
 
     private func updateCurrentDay() {

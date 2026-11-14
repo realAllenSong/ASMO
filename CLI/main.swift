@@ -47,6 +47,8 @@ Important dates (birthdays, anniversaries, holidays; every year)
   asmo date rm ID
 
   asmo undo                          take back the last change made with asmo (repeat for earlier ones)
+  asmo mirror [on|off]               keep Apple Calendar (timed items) and Reminders (day items) in step
+                                     with 逐日 now, both ways, and report what changed; on/off turns it on or off
   asmo open                          bring the app's window to the front
   asmo ping                          is the app there
   asmo mcp                           run as an MCP server on stdin/stdout (for apps without a shell)
@@ -395,6 +397,10 @@ do {
     case "ping": request["cmd"] = "ping"
     case "open": request["cmd"] = "show"
     case "undo": request["cmd"] = "undo"
+    case "mirror":
+        request["cmd"] = "mirror"
+        if rest.first == "on" { request["on"] = true }
+        if rest.first == "off" { request["on"] = false }
     case "today", "day":
         request = ["cmd": "day", "day": command == "today" ? "today" : rest.first ?? "today"]
     case "list":

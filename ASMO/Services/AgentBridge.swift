@@ -168,6 +168,10 @@ final class AgentCommands {
         case "page-write": return try await writePage(body)
         case "page-set": return try await setBlock(body)
         case "page-remove": return try removeBlocks(body)
+        case "mirror":
+            // Keep Apple Calendar and Reminders in step now, and say what that did.
+            if let on = body["on"] as? Bool { UserDefaults.standard.set(on, forKey: CalendarMirror.enabledKey) }
+            return await CalendarMirror.shared.run()
         #endif
         case "dates": return ["dates": try dates().map(json)]
         case "date-add": return try addDate(body)
