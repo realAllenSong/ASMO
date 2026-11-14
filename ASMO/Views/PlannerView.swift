@@ -4330,6 +4330,14 @@ struct PlannerView: View {
         let started = Date.now
         defer { PerfLog.note("indexArchive", since: started) }
         #endif
+        // The history only changes when something is imported: with the same documents as last time, the days
+        // saved then (read at launch) are still right, and 130,000 characters aren't parsed again.
+        let stamp = archives.map { $0.digest + ":" + String($0.defaultYear) }.sorted().joined(separator: ",")
+        let stampKey = "archiveIndexStamp." + (ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] ?? "main")
+        if !archivedDays.isEmpty, UserDefaults.standard.string(forKey: stampKey) == stamp {
+            if earliestArchiveDay == nil { earliestArchiveDay = archivedDays.keys.min() }
+            return
+        }
         let sources = archives.map { (raw: $0.raw, year: $0.defaultYear, digest: $0.digest) }
         let capturedClock = clock
         let result = await Task.detached(priority: .utility) {
@@ -4349,6 +4357,7 @@ struct PlannerView: View {
             archivedDays = result
             earliestArchiveDay = result.keys.min()
             archiveRevision += 1
+            UserDefaults.standard.set(stamp, forKey: stampKey)
         }
     }
 
