@@ -50,6 +50,8 @@ private enum ArchiveIndexCache {
         return Dictionary(pairs.map { ($0.day, $0.entries) }, uniquingKeysWith: { first, _ in first })
     }()
 
+    static func clear() { try? FileManager.default.removeItem(at: url) }
+
     static func save(_ days: [PlanDate: [ArchivedDayEntry]]) {
         let pairs = days.map { Pair(day: $0.key, entries: $0.value) }
         if let data = try? JSONEncoder().encode(pairs) { try? data.write(to: url, options: .atomic) }
@@ -4330,8 +4332,39 @@ struct PlannerView: View {
         let started = Date.now
         defer { PerfLog.note("indexArchive", since: started) }
         #endif
-        // The history only changes when something is imported: with the same documents as last time, the days
-        // saved then (read at launch) are still right, and 130,000 characters aren't parsed again.
+        #if os(macOS)
+        // Imported history is stored once as each day's own page, like any saved document: nothing is parsed at
+        // launch. Only a document imported since (not yet in the pages) is read, then written into its days.
+        let movedKey = "archiveInPages." + (ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] ?? "main")
+        var moved = Set(UserDefaults.standard.stringArray(forKey: movedKey) ?? [])
+        let fresh = archives.filter { !moved.contains($0.digest + ":" + String($0.defaultYear)) }
+        guard !fresh.isEmpty else {
+            if !archivedDays.isEmpty { archivedDays = [:]; ArchiveIndexCache.clear() }
+            return
+        }
+        let freshSources = fresh.map { (raw: $0.raw, year: $0.defaultYear, digest: $0.digest) }
+        let parseClock = clock
+        let parsed = await Task.detached(priority: .utility) {
+            var days: [PlanDate: [ArchivedDayEntry]] = [:]
+            for source in freshSources {
+                for entry in ArchiveParser.parse(source.raw, defaultYear: source.year, clock: parseClock).entries {
+                    guard let day = entry.schedule?.dayOnly, day.day != nil,
+                          !days[day, default: []].contains(where: { $0.entry.id == entry.id }) else { continue }
+                    days[day, default: []].append(ArchivedDayEntry(documentDigest: source.digest, defaultYear: source.year, entry: entry))
+                }
+            }
+            return days
+        }.value
+        guard !Task.isCancelled else { return }
+        writeHistoryPages(parsed)
+        moved.formUnion(fresh.map { $0.digest + ":" + String($0.defaultYear) })
+        UserDefaults.standard.set(Array(moved), forKey: movedKey)
+        archivedDays = [:]
+        ArchiveIndexCache.clear()
+        archiveRevision += 1
+        pageRebuild += 1
+        return
+        #else
         let stamp = archives.map { $0.digest + ":" + String($0.defaultYear) }.sorted().joined(separator: ",")
         let stampKey = "archiveIndexStamp." + (ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] ?? "main")
         if !archivedDays.isEmpty, UserDefaults.standard.string(forKey: stampKey) == stamp {
@@ -4359,7 +4392,47 @@ struct PlannerView: View {
             archiveRevision += 1
             UserDefaults.standard.set(stamp, forKey: stampKey)
         }
+        #endif
     }
+
+    #if os(macOS)
+    /// Writes imported history into each day's page, as ordinary text (struck lines stay struck), above whatever
+    /// the page already has. Lines that became items, or that repeat an item's title, aren't written twice.
+    private func writeHistoryPages(_ days: [PlanDate: [ArchivedDayEntry]]) {
+        let promoted = Set(tasks.compactMap(\.importKey))
+        let edits = Dictionary(journalEdits.map { ($0.recordKey, $0.body) }, uniquingKeysWith: { newest, _ in newest })
+        var pages = Dictionary(dayPages.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
+        let titles = Dictionary(grouping: tasks.filter { $0.schedule?.dayOnly.day != nil }) { $0.schedule!.dayOnly }
+        let font = NSFont.systemFont(ofSize: 15)
+        for (day, entries) in days {
+            var seen = Set((titles[day] ?? []).map { $0.title.trimmed })
+            let text = NSMutableAttributedString()
+            for item in entries where !item.entry.body.trimmed.isEmpty && !promoted.contains(item.entry.id) {
+                let entry = JournalArchiveText(edits[item.recordKey] ?? item.entry.body)
+                guard seen.insert(entry.text.trimmed).inserted else { continue }
+                for line in entry.text.components(separatedBy: .newlines).map(\.trimmed) where !line.isEmpty {
+                    var attributes: [NSAttributedString.Key: Any] = [.font: font]
+                    if entry.completed { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+                    text.append(NSAttributedString(string: line + "\n", attributes: attributes))
+                }
+            }
+            guard text.length > 0 else { continue }
+            let page = pages[day.key]
+            if let data = page?.rtfd, let old = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtfd], documentAttributes: nil) {
+                text.append(old)
+            }
+            guard let data = try? text.data(from: NSRange(location: 0, length: text.length),
+                                            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]) else { continue }
+            if let page { page.rtfd = data; page.updatedAt = .now }
+            else {
+                let made = DayPage(dayKey: day.key, rtfd: data)
+                context.insert(made)
+                pages[day.key] = made
+            }
+        }
+        persist()
+    }
+    #endif
 
     private var jumpSheet: some View {
         #if os(macOS)
