@@ -37,7 +37,8 @@ struct DocDay: Equatable {
 struct DocActions {
     /// A finished line of writing. Returns the lines to show in its place (for this day); items that landed on
     /// other days are reported through `movedElsewhere`. Nil means "keep it as a note".
-    var commit: (_ text: String, _ day: PlanDate, _ parent: UUID?, _ done: Bool) -> [DocLine]?
+    /// `page` is the day the line was written under: "明天" counts from it, even when the line goes to another day.
+    var commit: (_ text: String, _ day: PlanDate, _ page: PlanDate, _ parent: UUID?, _ done: Bool) -> [DocLine]?
     var update: (_ line: DocLine, _ text: String, _ day: PlanDate, _ parent: UUID?) -> Void
     var toggle: (_ line: DocLine, _ day: PlanDate) -> Void
     /// An item deleted from the page came back (⌘Z): put it back in the store. False if it can't be.
@@ -148,8 +149,17 @@ struct DayDocumentView: NSViewRepresentable {
     var autofocus = true
     /// The page's least height (an empty day in the writing view is just a line).
     var minHeight: CGFloat = 80
+    /// Organize finished lines after a pause in typing. Off: only when the cursor leaves the day, the page loses
+    /// focus or ⌘↵ (nothing changes under the writer while they are still thinking).
+    var organizeWhenIdle = true
 
     func makeCoordinator() -> DocCoordinator { DocCoordinator(self) }
+
+    /// Leaving the page by any route (another view, ⌘1/⌘2, closing): what was written is organized, the same as
+    /// when it loses the cursor. Results land in their days even though the page is gone.
+    static func dismantleNSView(_ view: DocTextView, coordinator: DocCoordinator) {
+        coordinator.organize(includingCurrent: true)
+    }
 
     /// The page lives inside the 逐日 card: no scroll view of its own, it grows with what's written.
     func makeNSView(context: Context) -> DocTextView {
@@ -326,6 +336,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     var rebuildRequest = 0
     /// The look the text was last drawn for.
     var builtDark: Bool?
+    /// The day the cursor is in (to notice it leaving one).
+    private var cursorDay: PlanDate?
     var keyMonitor: Any?
     private var idleOrganize: DispatchWorkItem?
     private var organizingNow = false
@@ -405,6 +417,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             if let notes = day.notes, let saved = try? NSAttributedString(
                 data: notes, options: [.documentType: NSAttributedString.DocumentType.rtfd], documentAttributes: nil) {
                 let note = NSMutableAttributedString(attributedString: saved)
+                Self.neutralizeInk(note, ink: ink)
+                note.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: note.length)) { value, range, _ in
+                    if value == nil { note.addAttribute(.foregroundColor, value: ink, range: range) }
+                }
                 if !note.string.hasSuffix("\n") { note.append(NSAttributedString(string: "\n", attributes: bodyAttributes)) }
                 note.addAttribute(.asmoNote, value: true, range: NSRange(location: 0, length: note.length))
                 text.append(note)
@@ -623,6 +639,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
         // A pause in writing is when the finished lines get organized (never the line being written).
         idleOrganize?.cancel()
+        guard parent.organizeWhenIdle else { return }
         let idle = DispatchWorkItem { [weak self] in self?.organize(includingCurrent: false) }
         idleOrganize = idle
         DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: idle)
@@ -684,6 +701,29 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         saveNotes(list)
     }
 
+    /// The page's own inks (both looks): never saved as a line's color.
+    static func isThemeColor(_ color: NSColor, includingAccent: Bool = true) -> Bool {
+        let palette = [false, true].flatMap { dark -> [Color] in
+            let theme = PlannerTheme(dark: dark)
+            return includingAccent ? [theme.ink, theme.quiet, theme.accent] : [theme.ink, theme.quiet]
+        }
+        guard let color = color.usingColorSpace(.sRGB) else { return false }
+        return palette.contains { NSColor($0).usingColorSpace(.sRGB).map {
+            abs($0.redComponent - color.redComponent) + abs($0.greenComponent - color.greenComponent) + abs($0.blueComponent - color.blueComponent) < 0.08
+        } ?? false }
+    }
+
+    /// Notes keep only colors someone chose: the text ink of either look is left out when saving and drawn in the
+    /// current look's ink when loading (so a note written in light mode stays readable in dark, and back).
+    static func neutralizeInk(_ text: NSMutableAttributedString, ink: NSColor?) {
+        let whole = NSRange(location: 0, length: text.length)
+        text.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
+            guard let color = value as? NSColor, isThemeColor(color, includingAccent: false) else { return }
+            if let ink { text.addAttribute(.foregroundColor, value: ink, range: range) }
+            else { text.removeAttribute(.foregroundColor, range: range) }
+        }
+    }
+
     /// The formatting of an item line's title, read from its last written character (the time before it is
     /// drawn in its own style, so it's skipped).
     private func titleStyle(in range: NSRange) -> String? {
@@ -708,8 +748,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         if attributes[.underlineStyle] != nil { parts.append("u") }
         // Struck through = done (drawn that way for done items, or struck by the writer).
         if attributes[.strikethroughStyle] != nil { parts.append("s") }
-        if let color = (attributes[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB),
-           ![ink, quiet, accent].contains(where: { $0.usingColorSpace(.sRGB).map { abs($0.redComponent - color.redComponent) + abs($0.greenComponent - color.greenComponent) + abs($0.blueComponent - color.blueComponent) < 0.05 } ?? false }) {
+        // A color is the writer's only when it isn't one the page draws with, in either look.
+        if let color = (attributes[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB), !DocCoordinator.isThemeColor(color) {
             parts.append(String(format: "#%02X%02X%02X", Int(color.redComponent * 255), Int(color.greenComponent * 255), Int(color.blueComponent * 255)))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
@@ -744,8 +784,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             if let last = savedNotes[day], last.pending == pendingNow,
                (last.text == nil && text == nil) || (text.map { last.text?.isEqual(to: $0) ?? false } ?? false) { continue }
             savedNotes[day] = (text?.copy() as? NSAttributedString, pendingNow)
-            let data = text.flatMap {
-                try? $0.data(from: NSRange(location: 0, length: $0.length),
+            let data = text.flatMap { original -> Data? in
+                let neutral = NSMutableAttributedString(attributedString: original)
+                Self.neutralizeInk(neutral, ink: nil)
+                return try? neutral.data(from: NSRange(location: 0, length: neutral.length),
                              documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd])
             }
             let pending = list.filter { $0.day == day && !$0.isHeading && $0.id == nil && !$0.isNote && !$0.text.isEmpty }
@@ -877,7 +919,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                     // Already an item (said again, done now, or moved): updated, nothing new to draw.
                     continue
                 }
-                var made = parent.actions.commit(piece, pieceDay, follows ? lastTop : parentTask, done) ?? []
+                var made = parent.actions.commit(piece, pieceDay, day, follows ? lastTop : parentTask, done) ?? []
                 if !follows, let first = made.first(where: { $0.kind == .task }) { lastTop = UUID(uuidString: first.id) }
                 if pieceDay != day {
                     if !made.isEmpty { parent.actions.moved(made.count, pieceDay) }
@@ -937,7 +979,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             mark(paragraph.range, note: true)
             return .note
         }
-        guard let lines = parent.actions.commit(paragraph.text, day, parentTask, false) else {
+        guard let lines = parent.actions.commit(paragraph.text, day, day, parentTask, false) else {
             mark(paragraph.range, note: true)
             return .note
         }
@@ -1076,6 +1118,15 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             }
         }
         cleanTypingAttributes(textView)
+        // The cursor moved to another day: what was written in the day it left is organized now.
+        if !parent.organizeWhenIdle {
+            let day = paragraphs().last(where: { $0.isHeading && $0.range.location <= textView.selectedRange().location })?.day
+            if let day, day != cursorDay {
+                let left = cursorDay
+                cursorDay = day
+                if left != nil { DispatchQueue.main.async { [weak self] in self?.organize(includingCurrent: false) } }
+            }
+        }
     }
 
     // MARK: Checkboxes

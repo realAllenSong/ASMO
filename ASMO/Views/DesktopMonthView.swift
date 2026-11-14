@@ -60,6 +60,8 @@ struct DesktopMonthView: View {
     /// Mac has no top bar: settings sit at the end of the month's row.
     var settings: (() -> Void)? = nil
     var logo = false
+    /// Shown first in the month's row instead of the logo (the Mac's shared 文档 | 日历 switch).
+    var leading: AnyView? = nil
     @State private var showingMonthPlans = false
     #if os(iOS)
     /// The month follows the finger while it is dragged up or down.
@@ -84,7 +86,9 @@ struct DesktopMonthView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 5) {
-                if logo {
+                if let leading {
+                    leading.padding(.trailing, 14)
+                } else if logo {
                     Image("BrandMark").resizable().interpolation(.high).scaledToFit()
                         .frame(width: 28, height: 26)
                         .padding(.trailing, 8)

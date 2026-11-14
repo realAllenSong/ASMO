@@ -192,6 +192,8 @@ struct PlannerView: View {
     /// The Apple Intelligence assistant (iPhone) is working on what was typed or said.
     /// Mac home: "paper" (one continuous document, like a doc you just write in) or "calendar".
     @AppStorage("macHome") private var macHome = "paper"
+    /// The day the paper opens on (today, or a day double-clicked in the calendar).
+    @State private var paperFocus: PlanDate?
     @State private var assistantWorking = false
     @State private var assistantCommands: AgentCommands?
     /// Something said or typed in the bar is being organized by the model.
@@ -302,6 +304,20 @@ struct PlannerView: View {
             let today = clock.today
             // 逐日 is the writing view: open on today, cursor in today's box.
             // Items struck through on a page before strike meant "done": they're done.
+            #if os(macOS)
+            // A look change once saved the page's own ink as a line's color: those aren't the writer's colors.
+            for task in tasks {
+                guard let style = task.titleStyle else { continue }
+                let kept = style.split(separator: " ").filter { part in
+                    guard part.hasPrefix("#"), part.count == 7, let value = Int(part.dropFirst(), radix: 16) else { return true }
+                    let color = NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255,
+                                        blue: CGFloat(value & 255) / 255, alpha: 1)
+                    return !DocCoordinator.isThemeColor(color)
+                }
+                let joined = kept.joined(separator: " ")
+                if joined != style { task.titleStyle = joined.isEmpty ? nil : joined }
+            }
+            #endif
             for task in tasks where (task.titleStyle ?? "").split(separator: " ").contains("s") {
                 task.completed = true
                 let rest = (task.titleStyle ?? "").split(separator: " ").filter { $0 != "s" }
@@ -434,13 +450,16 @@ struct PlannerView: View {
             #if os(macOS)
             // Mac: the calendar is home; a day is written in its popup (DayEditorSheet). The month only redraws
             // when what it shows changed (opening a day, typing in it, the notice… leave it alone: no hitch).
-            if macHome == "paper" {
-                paperHome
-            } else {
-                CalendarHost(key: calendarKey) { desktopMonth }
-                    .equatable()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .top) { homeSwitch.padding(.top, 10) }
+            ZStack {
+                if macHome == "paper" {
+                    paperHome
+                        .transition(.opacity.combined(with: .scale(scale: 0.99, anchor: .top)))
+                } else {
+                    CalendarHost(key: calendarKey) { desktopMonth }
+                        .equatable()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity.combined(with: .scale(scale: 0.99, anchor: .top)))
+                }
             }
             #else
             // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
@@ -932,9 +951,29 @@ struct PlannerView: View {
 
     #if os(macOS)
     /// The day being written, as a page over the calendar.
-    /// The days on the paper: the past week, today, and the two weeks ahead.
+    /// The days on the paper: today and the two weeks ahead, plus earlier days only where something was written
+    /// (empty past days would just be headings to scroll past), and the day the paper was asked to show.
     private var paperDays: [PlanDate] {
-        (-7...14).compactMap { clock.offset(days: $0) }
+        let today = clock.today
+        var days = Set((0...14).compactMap { clock.offset(days: $0) })
+        let since = clock.offset(days: -60)?.key ?? today.key
+        for task in tasks where !task.calendarLinked {
+            if let day = task.schedule?.dayOnly, day.day != nil, day.key >= since, day.key < today.key { days.insert(day) }
+        }
+        for page in dayPages where page.dayKey >= since && page.dayKey < today.key {
+            if let day = JournalDays.date(forKey: page.dayKey) { days.insert(day) }
+        }
+        if let paperFocus { days.insert(paperFocus) }
+        return days.sorted()
+    }
+
+    /// The logo and 文档 | 日历: the same place in both views.
+    private var homeLeading: some View {
+        HStack(spacing: 10) {
+            Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
+                .accessibilityHidden(true)
+            homeSwitch
+        }
     }
 
     /// 文档 | 日历.
@@ -945,7 +984,8 @@ struct PlannerView: View {
                     guard macHome != value else { return }
                     if documentDay != nil { closeDocument() }
                     pageController.textView?.window?.makeFirstResponder(nil)
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { macHome = value }
+                    if value == "paper" { paperFocus = nil }
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { macHome = value }
                 } label: {
                     Text(label.localized).font(.system(size: 12, weight: macHome == value ? .semibold : .medium))
                         .foregroundStyle(macHome == value ? theme.accent : theme.quiet)
@@ -966,9 +1006,7 @@ struct PlannerView: View {
             ZStack {
                 PageToolbar(controller: pageController, theme: theme).fixedSize()
                 HStack(spacing: 8) {
-                    Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
-                        .accessibilityHidden(true)
-                    homeSwitch
+                    homeLeading
                     Spacer()
                     Button {
                         guard let text = pageController.textView?.textStorage else { return }
@@ -990,16 +1028,17 @@ struct PlannerView: View {
                     .accessibilityLabel("设置")
                 }
             }
-            .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
+            // The same height and padding as the calendar's row, so nothing jumps when switching.
+            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 6)
             ZStack(alignment: .top) {
                 Rectangle().fill(theme.line.opacity(0.6)).frame(height: 1)
                 if documentOrganizing { ProgressView().progressViewStyle(.linear).tint(theme.accent).frame(height: 2) }
             }
             .frame(height: 2)
             ScrollView {
-                DayDocumentView(days: paperDays.map { documentDay($0) }, anchor: clock.today, theme: theme, actions: documentActions,
-                                controller: pageController, organizeRequest: organizeTick, rebuildRequest: pageRebuild,
-                                autofocus: true, minHeight: 600)
+                DayDocumentView(days: paperDays.map { documentDay($0) }, anchor: paperFocus ?? clock.today, theme: theme,
+                                actions: documentActions, controller: pageController, organizeRequest: organizeTick,
+                                rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false)
                     .frame(maxWidth: 820)
                     .padding(.horizontal, 40).padding(.top, 18).padding(.bottom, 240)
                     .frame(maxWidth: .infinity)
@@ -2294,8 +2333,13 @@ struct PlannerView: View {
                                 jump: {
                                     jumpDate = monthCursor.date(in: calendar) ?? .now
                                     sheet = .jump
-                                }, openDay: { openDocument($0) }, add: quickAddToCalendar,
-                                settings: Self.calendarHome ? { sheet = .settings } : nil, logo: Self.calendarHome)
+                                }, openDay: { day in
+                                    // Double-click: that day on the paper (the document is where days are written).
+                                    paperFocus = day.dayOnly
+                                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { macHome = "paper" }
+                                }, add: quickAddToCalendar,
+                                settings: Self.calendarHome ? { sheet = .settings } : nil, logo: Self.calendarHome,
+                                leading: AnyView(homeLeading))
             .task(id: request) {
                 let result = await system.agendaEvents(on: month.days, calendar: calendar, linkedAnchors: anchors)
                 if !Task.isCancelled { monthEvents = result }
@@ -2322,7 +2366,13 @@ struct PlannerView: View {
     private func handleVoiceKey(_ note: Notification) {
         switch note.name {
         case .asmoView:
+            #if os(macOS)
+            let target = (note.object as? Int ?? 0) == 0 ? "paper" : "calendar"
+            if target == "paper" { paperFocus = nil }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { macHome = target }
+            #else
             selectWorkspace(note.object as? Int ?? 0)
+            #endif
         case .asmoPageChanged:
             // An agent wrote on the page that is open: show it.
             if let key = note.object as? String,
@@ -2360,7 +2410,19 @@ struct PlannerView: View {
                 if text.hasPrefix("edit:"), let day = JournalDays.date(forKey: String(text.dropFirst(5)).trimmed) { openDocument(day); return }
                 // "step:1": the page's › (‹ with -1).
                 if text.hasPrefix("step:"), let step = Int(String(text.dropFirst(5)).trimmed) { stepDocument(step); return }
-                if text.trimmed == "cal" { selectWorkspace(1); return }
+                if text.trimmed == "cal" {
+                    #if os(macOS)
+                    withAnimation(.smooth(duration: 0.25)) { macHome = "calendar" }
+                    #else
+                    selectWorkspace(1)
+                    #endif
+                    return
+                }
+                if text.trimmed == "paper" { paperFocus = nil; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return }
+                // "paperday:2026-11-20": what a double-click on that day in the calendar does.
+                if text.hasPrefix("paperday:"), let day = JournalDays.date(forKey: String(text.dropFirst(9)).trimmed) {
+                    paperFocus = day; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return
+                }
                 if text.trimmed == "settings" { sheet = .settings; return }
                 // "bar:<text>": the floating bar, typed and sent. "check:<title>" / "delete:<title>": the row actions.
                 // "popover:<N>": 日历's day panel for today+N. "undo": ⌘Z.
@@ -2639,7 +2701,7 @@ struct PlannerView: View {
 
     private var documentActions: DocActions {
         DocActions(
-            commit: { text, day, parent, done in commitDocumentLine(text, day: day, parent: parent, done: done) },
+            commit: { text, day, page, parent, done in commitDocumentLine(text, day: day, page: page, parent: parent, done: done) },
             update: { line, text, day, parent in updateDocumentLine(line, text: text, day: day, parent: parent) },
             toggle: { line, day in
                 if line.kind == .task, let task = tasks.first(where: { $0.id.uuidString == line.id }) {
@@ -2740,8 +2802,8 @@ struct PlannerView: View {
         return copy
     }
 
-    private func commitDocumentLine(_ text: String, day: PlanDate, parent: UUID?, done: Bool = false) -> [DocLine]? {
-        let relative = pageClock(organizingBase ?? editingDay ?? documentDay ?? day)
+    private func commitDocumentLine(_ text: String, day: PlanDate, page: PlanDate? = nil, parent: UUID?, done: Bool = false) -> [DocLine]? {
+        let relative = pageClock(organizingBase ?? page ?? editingDay ?? documentDay ?? day)
         // The organizer already wrote this as exactly one item: read it whole, never as a command.
         let whole = text.hasPrefix(Dictation.wholeMarker)
         if !whole, let command = PlannerCommand.parse(text, clock: relative, defaultDay: day) {
@@ -4101,6 +4163,7 @@ struct PlannerView: View {
 
     private func showToday() {
         #if os(macOS)
+        if macHome == "paper" { paperFocus = nil; pageRebuild += 1; return }
         if Self.calendarHome { monthDetail = nil; monthCursor = clock.today; selected = clock.today; return }
         #endif
         if let current = editingDay {

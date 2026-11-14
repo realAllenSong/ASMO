@@ -71,7 +71,7 @@ struct ASMOApp: App {
                 Button("回到今天") { NotificationCenter.default.post(name: .asmoToday, object: nil) }
                     .keyboardShortcut("t", modifiers: [.command, .shift])
                 Divider()
-                Button("逐日") { NotificationCenter.default.post(name: .asmoView, object: 0) }
+                Button("文档") { NotificationCenter.default.post(name: .asmoView, object: 0) }
                     .keyboardShortcut("1", modifiers: .command)
                 Button("日历") { NotificationCenter.default.post(name: .asmoView, object: 1) }
                     .keyboardShortcut("2", modifiers: .command)
