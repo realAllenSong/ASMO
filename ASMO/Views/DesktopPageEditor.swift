@@ -582,7 +582,7 @@ struct PageToolbar: View {
             tool("highlighter", "高亮 ==文字==", controller.highlight)
             colorDot(.systemRed, "标红")
             colorDot(NSColor(theme.accent), "标紫")
-            tool("textformat", "恢复默认颜色") { controller.color(nil) }
+            tool("eraser", "恢复默认颜色") { controller.color(nil) }
             divider
             tool("textformat.size.larger", "标题（留在页面上，不变成待办）", controller.toggleHeading)
             tool("list.bullet", "项目符号", { controller.toggleLinePrefix("• ") })
@@ -606,19 +606,19 @@ struct PageToolbar: View {
             .help("⌘↵ · 普通行变成待办，缩进变子任务；标题、图片和长段落留在页面上")
             }
         }
-        .padding(.horizontal, 6).padding(.vertical, 4)
-        .background(theme.surface.opacity(0.8), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(theme.surface.opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var divider: some View {
-        Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
+        Rectangle().fill(theme.line).frame(width: 1, height: 18).padding(.horizontal, 5)
     }
 
     private func tool(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium))
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium))
                 .foregroundStyle(theme.ink.opacity(0.8))
-                .frame(width: 26, height: 24).contentShape(Rectangle())
+                .frame(width: 32, height: 30).contentShape(Rectangle())
         }
         .buttonStyle(DesktopButtonStyle(theme: theme))
         .help(help.localized)
@@ -627,8 +627,8 @@ struct PageToolbar: View {
 
     private func colorDot(_ color: NSColor, _ help: String) -> some View {
         Button { controller.color(color) } label: {
-            Circle().fill(Color(nsColor: color)).frame(width: 12, height: 12)
-                .frame(width: 24, height: 24).contentShape(Rectangle())
+            Circle().fill(Color(nsColor: color)).frame(width: 14, height: 14)
+                .frame(width: 30, height: 30).contentShape(Rectangle())
         }
         .buttonStyle(DesktopButtonStyle(theme: theme))
         .help(help.localized)

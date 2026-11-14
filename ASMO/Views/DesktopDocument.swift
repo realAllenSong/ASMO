@@ -226,6 +226,11 @@ struct DayDocumentView: NSViewRepresentable {
             context.coordinator.build(days, anchor: anchor)
             return
         }
+        // Midnight passed: 今天 / 明天 move on, and the writer stays where they are.
+        if let today = days.first(where: \.isToday)?.day, let built = context.coordinator.builtToday, built != today {
+            context.coordinator.rebuildInPlace(days)
+            return
+        }
         context.coordinator.reconcile(days)
     }
 }
@@ -271,6 +276,36 @@ final class DocTextView: NSTextView {
         return super.performKeyEquivalent(with: event)
     }
 
+    // Pasting and dropping: links become cards, pictures and videos are shown, Markdown is drawn (DocPaste).
+    override func paste(_ sender: Any?) {
+        if let body = coordinator?.writingAttributes, DocPaste.insert(from: .general, into: self, body: body) { return }
+        super.paste(sender)
+    }
+
+    /// ⌥⇧⌘V: the words alone, in the page's style.
+    override func pasteAsPlainText(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string), let body = coordinator?.writingAttributes else {
+            super.pasteAsPlainText(sender); return
+        }
+        insertText(NSAttributedString(string: text, attributes: body), replacementRange: selectedRange())
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        // Text dragged within the page moves as usual; things from elsewhere land where they're dropped.
+        if (sender.draggingSource as? NSTextView) !== self, let body = coordinator?.writingAttributes {
+            let point = convert(sender.draggingLocation, from: nil)
+            let index = characterIndexForInsertion(at: point)
+            let saved = selectedRange()
+            setSelectedRange(NSRange(location: index, length: 0))
+            if DocPaste.insert(from: sender.draggingPasteboard, into: self, body: body) {
+                window?.makeFirstResponder(self)
+                return true
+            }
+            setSelectedRange(saved)
+        }
+        return super.performDragOperation(sender)
+    }
+
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
         if ok { coordinator?.organize(includingCurrent: true) }
@@ -295,6 +330,13 @@ final class DocTextView: NSTextView {
             ?? storage.attribute(.asmoLine, at: max(0, index - 1), effectiveRange: nil) as? String {
             coordinator?.parent.actions.editTag(id)
             return
+        }
+        // A link card or video poster: a single click opens it (a double click still selects it).
+        if event.clickCount == 1, let index = characterIndex(at: point), let storage = textStorage, index < storage.length,
+           storage.attribute(.attachment, at: index, effectiveRange: nil) != nil,
+           let link = storage.attribute(.link, at: index, effectiveRange: nil) {
+            let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+            if let url { NSWorkspace.shared.open(url); return }
         }
         if let index = characterIndex(at: point), let storage = textStorage, index < storage.length,
            storage.attribute(.asmoCheck, at: index, effectiveRange: nil) != nil,
@@ -336,6 +378,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     var rebuildRequest = 0
     /// The look the text was last drawn for.
     var builtDark: Bool?
+    /// The day drawn as 今天 (midnight passing redraws the labels).
+    var builtToday: PlanDate?
     /// The day the cursor is in (to notice it leaving one).
     private var cursorDay: PlanDate?
     var keyMonitor: Any?
@@ -389,6 +433,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
     private var quiet: NSColor { NSColor(theme.quiet) }
     private var accent: NSColor { NSColor(theme.accent) }
 
+    /// What plain writing looks like (for pasting).
+    var writingAttributes: [NSAttributedString.Key: Any] { bodyAttributes }
+
     private var bodyAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 3
@@ -400,7 +447,32 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     // MARK: Building
 
-    func build(_ days: [DocDay], anchor: PlanDate) {
+    /// Draws the days again without moving the reader: the cursor keeps its distance from the end (what changes,
+    /// like the "今天" label at midnight, is above it) and the scroll position stays.
+    func rebuildInPlace(_ days: [DocDay]) {
+        guard let view, let storage = view.textStorage else { return }
+        syncEdits()
+        let cursor = view.selectedRange().location
+        let fromEnd = storage.length - cursor
+        // The line the cursor is in (its text and day) and how far into it: found again after drawing.
+        let before = paragraphs()
+        let here = before.first { $0.range.location <= cursor && cursor <= $0.range.location + ($0.text as NSString).length }
+        let visible = view.enclosingScrollView?.contentView.bounds.origin
+        let hadFocus = view.window?.firstResponder === view
+        build(days, anchor: anchor ?? days.first?.day ?? PlanDate.from(.now, calendar: .current), scrolls: false)
+        var location = max(0, min(storage.length, storage.length - fromEnd))
+        if let here, let again = paragraphs().first(where: { $0.text == here.text && $0.day == here.day && !$0.isHeading }) {
+            location = min(storage.length, again.range.location + cursor - here.range.location)
+        }
+        view.setSelectedRange(NSRange(location: location, length: 0))
+        if let visible, let clip = view.enclosingScrollView?.contentView {
+            clip.scroll(to: visible)
+            view.enclosingScrollView?.reflectScrolledClipView(clip)
+        }
+        if hadFocus { view.window?.makeFirstResponder(view) }
+    }
+
+    func build(_ days: [DocDay], anchor: PlanDate, scrolls: Bool = true) {
         #if DEBUG
         let started = Date.now
         defer { PerfLog.note("editorBuild", since: started) }
@@ -417,7 +489,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             if let notes = day.notes, let saved = try? NSAttributedString(
                 data: notes, options: [.documentType: NSAttributedString.DocumentType.rtfd], documentAttributes: nil) {
                 let note = NSMutableAttributedString(attributedString: saved)
-                Self.neutralizeInk(note, ink: ink)
+                Self.neutralizeInk(note, ink: ink, quiet: quiet)
+                let dark = theme.dark
+                MainActor.assumeIsolated { DocPaste.redrawCards(in: note, dark: dark) }
                 note.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: note.length)) { value, range, _ in
                     if value == nil { note.addAttribute(.foregroundColor, value: ink, range: range) }
                 }
@@ -440,6 +514,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             DispatchQueue.main.async { PerfLog.note("open→drawn", since: opened) }
         }
         #endif
+        builtToday = days.first(where: \.isToday)?.day
+        guard scrolls else { view.invalidateIntrinsicContentSize(); return }
         // Once more when the window has laid the document out (the first try can come before it has its size).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.scroll(to: anchor) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -632,7 +708,12 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         guard !applying else { return }
-        if let view { MainActor.assumeIsolated { MarkdownShortcuts.apply(view) } }
+        // (Markdown as you type is handled before the change, in markdownShortcut, so it can be undone.)
+        // Struck words go quiet right away, however they were struck (toolbar, ⌘ key, ~~ ~~).
+        if let view, let storage = view.textStorage, storage.length > 0 {
+            let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: min(view.selectedRange().location, storage.length - 1), length: 0))
+            Self.strikeQuietly(storage, in: paragraph, quiet: quiet, ink: ink)
+        }
         pendingSync?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.syncEdits() }
         pendingSync = work
@@ -715,12 +796,33 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     /// Notes keep only colors someone chose: the text ink of either look is left out when saving and drawn in the
     /// current look's ink when loading (so a note written in light mode stays readable in dark, and back).
-    static func neutralizeInk(_ text: NSMutableAttributedString, ink: NSColor?) {
+    static func neutralizeInk(_ text: NSMutableAttributedString, ink: NSColor?, quiet: NSColor? = nil) {
         let whole = NSRange(location: 0, length: text.length)
+        // Saving as RTFD stamps a black line color on struck and underlined text: invisible on the dark look.
+        // The line takes the text's color instead.
+        text.removeAttribute(.strikethroughColor, range: whole)
+        text.removeAttribute(.underlineColor, range: whole)
         text.enumerateAttribute(.foregroundColor, in: whole) { value, range, _ in
             guard let color = value as? NSColor, isThemeColor(color, includingAccent: false) else { return }
             if let ink { text.addAttribute(.foregroundColor, value: ink, range: range) }
             else { text.removeAttribute(.foregroundColor, range: range) }
+        }
+        // Struck words are drawn quiet, like a finished item: on Chinese the line alone runs along the strokes
+        // (二 struck reads as 三) and disappears.
+        if let quiet { strikeQuietly(text, in: whole, quiet: quiet) }
+    }
+
+    /// Struck words in the quiet ink; with `ink`, words no longer struck get their ink back (items keep their own look).
+    static func strikeQuietly(_ text: NSMutableAttributedString, in range: NSRange, quiet: NSColor, ink: NSColor? = nil) {
+        text.enumerateAttributes(in: range) { attributes, sub, _ in
+            let struck = (attributes[.strikethroughStyle] as? Int ?? 0) != 0
+            let color = attributes[.foregroundColor] as? NSColor
+            if let color, !isThemeColor(color, includingAccent: false) { return }
+            if struck {
+                if color != quiet { text.addAttribute(.foregroundColor, value: quiet, range: sub) }
+            } else if let ink, color == quiet, attributes[.asmoLine] == nil, attributes[.asmoTag] == nil, attributes[.asmoDay] == nil {
+                text.addAttribute(.foregroundColor, value: ink, range: sub)
+            }
         }
     }
 
@@ -1088,7 +1190,71 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             if paragraph.length == 0 { break }
         }
         cleanTypingAttributes(textView)
+        if let replacementString, range.length == 0, markdownShortcut(textView, at: range.location, typed: replacementString) {
+            return false
+        }
         return true
+    }
+
+    /// Markdown as you write it: "# " a heading, "- " a bullet, "[] " a checkbox at the start of a line;
+    /// **bold**, *italic*, ~~strike~~, `code` and ==highlight== when the closing mark is typed.
+    private func markdownShortcut(_ textView: NSTextView, at location: Int, typed: String) -> Bool {
+        guard typed.count == 1, let storage = textView.textStorage, textView.markedRange().length == 0 else { return false }
+        let string = storage.string as NSString
+        let line = string.paragraphRange(for: NSRange(location: min(location, string.length), length: 0))
+        guard storage.length == 0 || line.location >= storage.length
+                || storage.attribute(.asmoLine, at: line.location, effectiveRange: nil) == nil else { return false }
+        let before = string.substring(with: NSRange(location: line.location, length: location - line.location))
+        let indent = before.prefix { $0 == "\t" }
+        let typedBody = String(before.dropFirst(indent.count))
+        let lineStart = line.location + indent.utf16.count
+        var body = bodyAttributes
+        if typed == " " || typed == "\u{3000}" {
+            let bullets = ["-": "• ", "*": "• ", "+": "• ", "[]": "☐ ", "[ ]": "☐ ", "【】": "☐ ", "[x]": "☑ ", "[X]": "☑ "]
+            if let marker = bullets[typedBody] {
+                textView.insertText(NSAttributedString(string: marker, attributes: body),
+                                    replacementRange: NSRange(location: lineStart, length: typedBody.utf16.count))
+                return true
+            }
+            let sizes: [String: CGFloat] = ["#": 19, "##": 17, "###": 16]
+            if let size = sizes[typedBody] {
+                body[.font] = NSFont.systemFont(ofSize: size, weight: .semibold)
+                textView.insertText(NSAttributedString(string: "", attributes: body),
+                                    replacementRange: NSRange(location: lineStart, length: typedBody.utf16.count))
+                let rest = string.paragraphRange(for: NSRange(location: lineStart, length: 0))
+                if rest.length > 0 { storage.addAttribute(.font, value: body[.font]!, range: rest) }
+                textView.typingAttributes[.font] = body[.font]
+                return true
+            }
+            return false
+        }
+        // Inline marks: the closing mark finishes the span.
+        let typedText = before + typed
+        let patterns: [(String, (inout [NSAttributedString.Key: Any]) -> Void)] = [
+            (#"\*\*([^*\n]+)\*\*$"#, { $0[.font] = NSFont.systemFont(ofSize: 15, weight: .semibold) }),
+            (#"__([^_\n]+)__$"#, { $0[.font] = NSFont.systemFont(ofSize: 15, weight: .semibold) }),
+            (#"(?<![*])\*([^*\s][^*\n]*)\*$"#, { $0[.obliqueness] = 0.18 }),
+            (#"[~～]{2}([^~～\n]+)[~～]{2}$"#, { [quiet] in $0[.strikethroughStyle] = NSUnderlineStyle.single.rawValue; $0[.foregroundColor] = quiet }),
+            (#"`([^`\n]+)`$"#, {
+                $0[.font] = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+                $0[.backgroundColor] = PageMarkdown.codeBackground
+            }),
+            (#"==([^=\n]+)==$"#, { $0[.backgroundColor] = PageMarkdown.highlightBackground }),
+        ]
+        guard "*_~～`=".contains(typed) else { return false }
+        for (pattern, style) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: typedText, range: NSRange(location: 0, length: (typedText as NSString).length)) else { continue }
+            let inner = (typedText as NSString).substring(with: match.range(at: 1))
+            var attributes = bodyAttributes
+            style(&attributes)
+            let replaced = NSRange(location: line.location + match.range.location, length: match.range.length - typed.utf16.count)
+            textView.insertText(NSAttributedString(string: inner, attributes: attributes), replacementRange: replaced)
+            // What comes next is plain again.
+            textView.typingAttributes = bodyAttributes
+            return true
+        }
+        return false
     }
 
     /// Typed text keeps the user's formatting but never item, heading or note markers.
@@ -1097,7 +1263,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         for key in [NSAttributedString.Key.asmoLine, .asmoKind, .asmoCheck, .asmoTag, .asmoDay, .asmoNote, .attachment, .cursor] {
             attributes[key] = nil
         }
-        if (attributes[.font] as? NSFont).map({ $0.pointSize > 16 }) ?? true { attributes[.font] = bodyFont }
+        // After a day heading (or with no font) writing starts plain; a heading the writer made keeps its size.
+        if textView.typingAttributes[.asmoDay] != nil || attributes[.font] == nil { attributes[.font] = bodyFont }
         if attributes[.strikethroughStyle] != nil { attributes[.strikethroughStyle] = nil; attributes[.foregroundColor] = ink }
         textView.typingAttributes = attributes
     }

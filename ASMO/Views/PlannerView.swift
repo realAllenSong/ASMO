@@ -351,7 +351,12 @@ struct PlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in leftAt = .now }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in returnAfterAway() }
         #endif
-        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in updateCurrentDay() }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in updateCurrentDay() }
+        // The day-changed notice can be missed (asleep at midnight, clock changed): check now and then too.
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in updateCurrentDay() }
+        #if os(macOS)
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in updateCurrentDay() }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
             Task { await refresh() }
         }
@@ -858,7 +863,43 @@ struct PlannerView: View {
         case "line": if let range = find(rest) { view.setSelectedRange(string.paragraphRange(for: range)) }
         case "end": view.setSelectedRange(NSRange(location: storage.length, length: 0))
         case "ins": view.insertText(rest, replacementRange: view.selectedRange())
+        case "attrs":
+            // "attrs:TEXT": the raw attributes where TEXT starts, written to asmo-ed.txt.
+            // "attrs:TEXT|N": N characters after where TEXT starts.
+            let parts = rest.components(separatedBy: "|")
+            if let range = find(parts[0]) {
+                let at = min(storage.length - 1, range.location + (parts.count > 1 ? Int(parts[1]) ?? 0 : 0))
+                let attributes = storage.attributes(at: at, effectiveRange: nil)
+                try? attributes.map { "\($0.key.rawValue) = \($0.value)" }.sorted().joined(separator: "\n")
+                    .write(to: out, atomically: true, encoding: .utf8)
+            }
+            return
+        // "type:TEXT": one character at a time, as keys would (so as-you-type rules run); "⏎" is Return.
+        case "type":
+            for character in rest {
+                if character == "⏎" { view.doCommand(by: #selector(NSResponder.insertNewline(_:))); continue }
+                view.insertText(String(character), replacementRange: view.selectedRange())
+            }
         case "key": view.doCommand(by: Selector(rest))
+        case "paste", "pastefile", "pastehtml":
+            // A private pasteboard (never the user's clipboard): "paste:TEXT" (\n for new lines),
+            // "pastefile:/path" (as from Finder), "pastehtml:/path/page.html" (as from a browser).
+            let board = NSPasteboard(name: NSPasteboard.Name("asmo-test-paste"))
+            board.clearContents()
+            switch verb {
+            case "pastefile": board.writeObjects([URL(fileURLWithPath: rest) as NSURL])
+            case "pastehtml":
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: rest)) {
+                    board.declareTypes([.html, .string], owner: nil)
+                    board.setData(data, forType: .html)
+                    board.setString(String(decoding: data, as: UTF8.self), forType: .string)
+                }
+            default: board.setString(rest.replacingOccurrences(of: "\\n", with: "\n"), forType: .string)
+            }
+            if let doc = view as? DocTextView, let body = doc.coordinator?.writingAttributes,
+               !DocPaste.insert(from: board, into: doc, body: body) {
+                view.insertText(board.string(forType: .string) ?? "", replacementRange: view.selectedRange())
+            }
         case "rep":
             // "rep:12:deleteBackward:": a held key (about 30 ms per repeat).
             let parts = rest.split(separator: ":", maxSplits: 1).map(String.init)
@@ -954,7 +995,8 @@ struct PlannerView: View {
     /// The days on the paper: today and the two weeks ahead, plus earlier days only where something was written
     /// (empty past days would just be headings to scroll past), and the day the paper was asked to show.
     private var paperDays: [PlanDate] {
-        let today = clock.today
+        // Read through lastKnownToday so midnight passing redraws the document.
+        let today = max(lastKnownToday, clock.today)
         var days = Set((0...14).compactMap { clock.offset(days: $0) })
         let since = clock.offset(days: -60)?.key ?? today.key
         for task in tasks where !task.calendarLinked {
@@ -2422,6 +2464,10 @@ struct PlannerView: View {
                 // "paperday:2026-11-20": what a double-click on that day in the calendar does.
                 if text.hasPrefix("paperday:"), let day = JournalDays.date(forKey: String(text.dropFirst(9)).trimmed) {
                     paperFocus = day; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return
+                }
+                // "clock:86400": pretend it is that many seconds later (testing midnight); the day check follows.
+                if text.hasPrefix("clock:"), let seconds = TimeInterval(String(text.dropFirst(6)).trimmed) {
+                    CaptureClock.debugShift = seconds; updateCurrentDay(); return
                 }
                 if text.trimmed == "settings" { sheet = .settings; return }
                 // "bar:<text>": the floating bar, typed and sent. "check:<title>" / "delete:<title>": the row actions.
@@ -4152,6 +4198,7 @@ struct PlannerView: View {
 
     private func returnAfterAway() {
         defer { leftAt = nil }
+        updateCurrentDay()
         guard let leftAt, Date.now.timeIntervalSince(leftAt) > 20 * 60, sheet == nil else { return }
         #if os(macOS)
         // Back after a while: the calendar shows this month again (unless a page is open).

@@ -28,6 +28,10 @@ enum PageMarkdown {
     static let pictureWidth: CGFloat = 640
     /// A diagram's source travels inside its picture (the PNG's description), so it can be read back and redrawn.
     static let diagramMark = "asmo-mermaid:"
+    /// A pasted link's preview card and a pasted video's poster carry their address the same way:
+    /// "asmo-link:URL\nTITLE" / "asmo-video:URL\nNAME" (read back as a Markdown link).
+    static let linkMark = "asmo-link:"
+    static let videoMark = "asmo-video:"
     static let imageScheme = "asmo-image:"
     /// Holds an empty table cell or code line open (the editor drops paragraphs that are only whitespace, and a
     /// zero-width space counts as whitespace; a word joiner doesn't).
@@ -46,6 +50,15 @@ enum PageMarkdown {
 
     static var body: [NSAttributedString.Key: Any] {
         [.font: NSFont.systemFont(ofSize: bodySize), .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
+    }
+
+    static let codeBackground = NSColor.gray.withAlphaComponent(0.2)
+    static let highlightBackground = NSColor.systemYellow.withAlphaComponent(0.32)
+
+    /// A background is a highlight when it has color, inline code when it is gray.
+    static func isHighlight(_ color: NSColor) -> Bool {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return false }
+        return rgb.saturationComponent > 0.2
     }
 
     private static var codeFont: NSFont { .monospacedSystemFont(ofSize: 13, weight: .regular) }
@@ -186,15 +199,27 @@ enum PageMarkdown {
             var font = base[.font] as? NSFont ?? .systemFont(ofSize: bodySize)
             if run.inline.contains(.code) {
                 font = .monospacedSystemFont(ofSize: font.pointSize - 1, weight: .regular)
+                attributes[.backgroundColor] = codeBackground
             } else if emphasis {
                 if run.inline.contains(.stronglyEmphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
-                if run.inline.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+                if run.inline.contains(.emphasized) {
+                    font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+                    attributes[.obliqueness] = 0.18   // Chinese has no italic face: slanted
+                }
             }
             attributes[.font] = font
             if run.inline.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let link = run.link { attributes[.link] = link }
             let text = run.inline.contains(.lineBreak) ? "\u{2028}" : run.inline.contains(.softBreak) ? " " : run.text
-            result.append(NSAttributedString(string: text, attributes: attributes))
+            // ==highlight== (not CommonMark, but what the editor writes).
+            let pieces = run.inline.contains(.code) ? [text] : text.components(separatedBy: "==")
+            for (index, piece) in pieces.enumerated() where !piece.isEmpty {
+                var styled = attributes
+                if pieces.count >= 3, index % 2 == 1, index < pieces.count - (pieces.count % 2 == 0 ? 1 : 0) {
+                    styled[.backgroundColor] = highlightBackground
+                }
+                result.append(NSAttributedString(string: piece, attributes: styled))
+            }
         }
         return result
     }
@@ -277,7 +302,7 @@ enum PageMarkdown {
         var note = description
         // A diagram keeps its source and its size through being read and written again.
         let saved = (properties?[kCGImagePropertyPNGDictionary] as? [CFString: Any])?[kCGImagePropertyPNGDescription] as? String
-        if note == nil, let saved, saved.hasPrefix(diagramMark) { note = saved }
+        if note == nil, let saved, [diagramMark, linkMark, videoMark].contains(where: saved.hasPrefix) { note = saved }
         let dpi = properties?[kCGImagePropertyDPIWidth] as? CGFloat ?? 72
         // Shown at its own size in points (a 2× screenshot at half its pixels), never wider than the page.
         let natural = CGFloat(image.width) * 72 / max(dpi, 72)
@@ -340,12 +365,37 @@ enum PageMarkdown {
         return CGImageDestinationFinalize(destination) ? encoded as Data : nil
     }
 
-    private static func diagramSource(_ attachment: NSTextAttachment) -> String? {
+    private static func pictureNote(_ attachment: NSTextAttachment) -> String? {
         guard let data = attachment.fileWrapper?.regularFileContents, let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let note = (properties[kCGImagePropertyPNGDictionary] as? [CFString: Any])?[kCGImagePropertyPNGDescription] as? String,
-              note.hasPrefix(diagramMark) else { return nil }
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return nil }
+        return (properties[kCGImagePropertyPNGDictionary] as? [CFString: Any])?[kCGImagePropertyPNGDescription] as? String
+    }
+
+    private static func diagramSource(_ attachment: NSTextAttachment) -> String? {
+        guard let note = pictureNote(attachment), note.hasPrefix(diagramMark) else { return nil }
         return String(note.dropFirst(diagramMark.count))
+    }
+
+    struct Card {
+        var url: String
+        var title: String
+        var video: Bool
+        /// Link cards: the line about the page, and the look it was drawn for ("dark" / "light").
+        var summary: String?
+        var look: String?
+    }
+
+    /// A link card or video poster: where it points and what it is called
+    /// ("asmo-link:URL\nTITLE\nSUMMARY\nLOOK", the last two optional).
+    static func cardTarget(_ attachment: NSTextAttachment) -> Card? {
+        guard let note = pictureNote(attachment) else { return nil }
+        for (mark, video) in [(linkMark, false), (videoMark, true)] where note.hasPrefix(mark) {
+            let parts = note.dropFirst(mark.count).components(separatedBy: "\n")
+            guard let url = parts.first, !url.isEmpty else { return nil }
+            return Card(url: url, title: parts.count > 1 ? parts[1] : url, video: video,
+                        summary: parts.count > 2 && !parts[2].isEmpty ? parts[2] : nil, look: parts.count > 3 ? parts[3] : nil)
+        }
+        return nil
     }
 
     /// The pictures already on a page, by the name they are read back under ("asmo-image:2"), so Markdown that
@@ -509,6 +559,10 @@ enum PageMarkdown {
             if let attachment = attributes[.attachment] as? NSTextAttachment {
                 count += 1
                 if let source = diagramSource(attachment) { result += "```mermaid\n" + source + "\n```" }
+                else if let card = cardTarget(attachment) {
+                    let title = card.title.replacingOccurrences(of: "]", with: "\\]")
+                    result += "[" + (card.video ? "▶ " : "") + title + "](" + card.url + ")"
+                }
                 else { result += "![\(attachment.fileWrapper?.preferredFilename ?? "image")](\(imageScheme)\(count))" }
                 return
             }
@@ -519,11 +573,14 @@ enum PageMarkdown {
             guard !text.isEmpty else { result += lead; return }
             let font = attributes[.font] as? NSFont
             let traits = font.map { NSFontManager.shared.traits(of: $0) } ?? []
-            if font?.isFixedPitch == true { text = "`" + text + "`" }
+            let background = attributes[.backgroundColor] as? NSColor
+            let slanted = (attributes[.obliqueness] as? CGFloat ?? 0) > 0
+            if font?.isFixedPitch == true || (background.map { !isHighlight($0) } ?? false) { text = "`" + text + "`" }
             else if !heading {
                 if traits.contains(.boldFontMask) { text = "**" + text + "**" }
-                if traits.contains(.italicFontMask) { text = "*" + text + "*" }
+                if traits.contains(.italicFontMask) || slanted { text = "*" + text + "*" }
             }
+            if let background, isHighlight(background) { text = "==" + text + "==" }
             if attributes[.strikethroughStyle] != nil { text = "~~" + text + "~~" }
             if let link = (attributes[.link] as? URL)?.absoluteString ?? attributes[.link] as? String {
                 text = text == link ? link : "[" + text + "](" + link + ")"

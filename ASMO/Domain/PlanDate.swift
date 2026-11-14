@@ -47,7 +47,13 @@ struct PlanDate: Codable, Hashable, Comparable, Sendable {
 }
 
 struct CaptureClock: Sendable {
+    #if DEBUG
+    /// Debug builds: moves "now" (the nav driver's "clock:SECONDS"), for testing midnight without waiting for it.
+    nonisolated(unsafe) static var debugShift: TimeInterval = 0
+    var now: Date = Date.now.addingTimeInterval(CaptureClock.debugShift)
+    #else
     var now: Date = .now
+    #endif
     var calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
