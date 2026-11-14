@@ -2466,9 +2466,11 @@ struct PlannerView: View {
                     paperFocus = day; withAnimation(.smooth(duration: 0.25)) { macHome = "paper" }; return
                 }
                 // "clock:86400": pretend it is that many seconds later (testing midnight); the day check follows.
+                #if DEBUG
                 if text.hasPrefix("clock:"), let seconds = TimeInterval(String(text.dropFirst(6)).trimmed) {
                     CaptureClock.debugShift = seconds; updateCurrentDay(); return
                 }
+                #endif
                 if text.trimmed == "settings" { sheet = .settings; return }
                 // "bar:<text>": the floating bar, typed and sent. "check:<title>" / "delete:<title>": the row actions.
                 // "popover:<N>": 日历's day panel for today+N. "undo": ⌘Z.
