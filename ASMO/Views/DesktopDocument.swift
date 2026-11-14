@@ -104,6 +104,54 @@ struct LineJudgement {
     var drop = false
 }
 
+/// An item's title with its formatting, piece by piece: "b i u s #RRGGBB hl code" and a link per piece.
+/// A title in one style and no link is stored the old way ("b i"); anything richer as "runs:" + base64 JSON,
+/// a single token that older readers of the style skip.
+struct TitleRun: Codable, Equatable {
+    var t: String
+    var s = ""
+    var l: String?
+}
+
+enum RichTitle {
+    static let prefix = "runs:"
+
+    static func encode(_ runs: [TitleRun]) -> String? {
+        guard let first = runs.first else { return nil }
+        let simple = runs.allSatisfy { $0.s == first.s && $0.l == nil }
+            && !first.s.split(separator: " ").contains(where: { $0 == "hl" || $0 == "code" })
+        if simple { return first.s.isEmpty ? nil : first.s }
+        guard let data = try? JSONEncoder().encode(runs) else { return nil }
+        return prefix + data.base64EncodedString()
+    }
+
+    static func decode(_ style: String?) -> [TitleRun]? {
+        guard let style, style.hasPrefix(prefix), let data = Data(base64Encoded: String(style.dropFirst(prefix.count))) else { return nil }
+        return try? JSONDecoder().decode([TitleRun].self, from: data)
+    }
+
+    /// The pieces that make up `title` inside the line they were read from (the line may also hold a bullet or a
+    /// time that isn't part of the title). Nil when the title isn't there as written.
+    static func slice(_ runs: [TitleRun], to title: String) -> [TitleRun]? {
+        let whole = runs.map(\.t).joined() as NSString
+        let found = whole.range(of: title)
+        guard found.location != NSNotFound, found.length > 0 else { return nil }
+        var result: [TitleRun] = []
+        var offset = 0
+        for run in runs {
+            let length = (run.t as NSString).length
+            let overlap = NSIntersectionRange(NSRange(location: offset, length: length), found)
+            if overlap.length > 0 {
+                var piece = run
+                piece.t = (run.t as NSString).substring(with: NSRange(location: overlap.location - offset, length: overlap.length))
+                result.append(piece)
+            }
+            offset += length
+        }
+        return result
+    }
+}
+
 // MARK: Attributes
 
 extension NSAttributedString.Key {
@@ -113,6 +161,8 @@ extension NSAttributedString.Key {
     static let asmoCheck = NSAttributedString.Key("asmo.check")
     static let asmoTag = NSAttributedString.Key("asmo.tag")
     static let asmoNote = NSAttributedString.Key("asmo.note")
+    /// The time drawn before an item's title (it belongs to the item, not to the title's formatting).
+    static let asmoTime = NSAttributedString.Key("asmo.time")
 }
 
 // MARK: View
@@ -196,6 +246,7 @@ struct DayDocumentView: NSViewRepresentable {
         view.linkTextAttributes = [.foregroundColor: NSColor(theme.accent), .underlineStyle: NSUnderlineStyle.single.rawValue,
                                    .cursor: NSCursor.pointingHand]
         view.delegate = context.coordinator
+        view.textStorage?.delegate = context.coordinator
         view.coordinator = context.coordinator
         context.coordinator.view = view
         context.coordinator.rebuildRequest = rebuildRequest
@@ -301,6 +352,8 @@ final class DocTextView: NSTextView {
             // Physical [ and ] keys (33, 30), so it works with a Chinese input method too (where "[" types "【").
             if event.keyCode == 33 { coordinator?.parent.actions.navigate(-1); return true }
             if event.keyCode == 30 { coordinator?.parent.actions.navigate(1); return true }
+            // ⌘K: link the selection (the physical K key, whatever the input method).
+            if event.keyCode == 40 { coordinator?.parent.controller?.link(); return true }
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -453,7 +506,59 @@ final class DocTextView: NSTextView {
 
 // MARK: Coordinator
 
-final class DocCoordinator: NSObject, NSTextViewDelegate {
+/// One font object per face and size for the characters the page's font can't draw (Chinese, symbols).
+/// Left to itself the text system makes a new substitute font for every such run of text, each with its own
+/// 350 KB width table: a page of Chinese then holds hundreds of copies of the same font (100+ MB).
+enum SharedFonts {
+    nonisolated(unsafe) private static var known: [String: NSFont] = [:]
+    nonisolated(unsafe) private static var shared = Set<ObjectIdentifier>()
+
+    private static func unique(_ font: NSFont) -> NSFont {
+        let key = font.fontName + "|" + String(Double(font.pointSize))
+        if let existing = known[key] { return existing }
+        known[key] = font
+        shared.insert(ObjectIdentifier(font))
+        return font
+    }
+
+    /// Gives every run of characters its font from the shared set, so the text system has nothing to substitute.
+    static func apply(to text: NSMutableAttributedString, in range: NSRange) {
+        guard range.length > 0, NSMaxRange(range) <= text.length else { return }
+        let string = text.string as NSString
+        var changes: [(NSRange, NSFont)] = []
+        text.enumerateAttribute(.font, in: range) { value, run, _ in
+            guard let font = value as? NSFont else { return }
+            if shared.contains(ObjectIdentifier(font)) { return }
+            var characters = [unichar](repeating: 0, count: run.length)
+            string.getCharacters(&characters, range: run)
+            var glyphs = [CGGlyph](repeating: 0, count: run.length)
+            if CTFontGetGlyphsForCharacters(font, characters, &glyphs, run.length) { return }
+            // Runs of characters this font has no glyph for (line breaks and tabs draw nothing: skipped).
+            var start: Int?
+            func close(_ end: Int) {
+                guard let from = start else { return }
+                start = nil
+                let piece = NSRange(location: run.location + from, length: end - from)
+                let substitute = CTFontCreateForString(font, string.substring(with: piece) as CFString, CFRange(location: 0, length: piece.length)) as NSFont
+                changes.append((piece, unique(substitute)))
+            }
+            for index in 0..<run.length {
+                let missing = glyphs[index] == 0 && characters[index] > 32 && characters[index] != 0x200B && characters[index] != 0xFFFC
+                if missing { if start == nil { start = index } } else { close(index) }
+            }
+            close(run.length)
+        }
+        for (piece, font) in changes { text.addAttribute(.font, value: font, range: piece) }
+    }
+}
+
+final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    /// Typed and pasted text gets the shared fonts before the text system substitutes its own.
+    func textStorage(_ textStorage: NSTextStorage, willProcessEditing editedMask: NSTextStorageEditActions,
+                     range editedRange: NSRange, changeInLength delta: Int) {
+        SharedFonts.apply(to: textStorage, in: editedRange)
+    }
+
     var parent: DayDocumentView
     weak var view: DocTextView?
     var anchor: PlanDate?
@@ -743,12 +848,27 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         if let time = line.time {
             result.append(NSAttributedString(string: time + " ", attributes: base.merging([
                 .foregroundColor: line.done ? quiet : accent,
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold),
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold), .asmoTime: true,
             ]) { $1 }))
         }
-        var titleAttributes = base
-        if !line.done, let style = line.style { apply(style, to: &titleAttributes) }
-        result.append(NSAttributedString(string: line.title, attributes: titleAttributes))
+        if let runs = RichTitle.decode(line.style), let pieces = RichTitle.slice(runs, to: line.title),
+           pieces.map(\.t).joined() == line.title {
+            // A title with formatting inside it: each piece in its own style, links included.
+            for piece in pieces {
+                var attributes = base
+                apply(piece.s, to: &attributes)
+                if line.done {
+                    attributes[.foregroundColor] = quiet
+                    attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                }
+                if let link = piece.l, let url = URL(string: link) { attributes[.link] = url }
+                result.append(NSAttributedString(string: piece.t, attributes: attributes))
+            }
+        } else {
+            var titleAttributes = base
+            if !line.done, let style = line.style, !style.hasPrefix(RichTitle.prefix) { apply(style, to: &titleAttributes) }
+            result.append(NSAttributedString(string: line.title, attributes: titleAttributes))
+        }
         if let tag = line.tag {
             result.append(NSAttributedString(string: "  # " + tag, attributes: [
                 .font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: accent.withAlphaComponent(0.85), .asmoTag: true,
@@ -777,6 +897,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 attributes[.obliqueness] = 0.18   // Chinese fonts have no italic face: slant them
             case "u": attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             case "s": attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+            case "hl": attributes[.backgroundColor] = PageMarkdown.highlightBackground
+            case "code":
+                attributes[.font] = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+                attributes[.backgroundColor] = PageMarkdown.codeBackground
             default:
                 if part.hasPrefix("#"), part.count == 7, let value = Int(part.dropFirst(), radix: 16) {
                     attributes[.foregroundColor] = NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
@@ -947,21 +1071,21 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 continue
             }
             // Only lines that changed since the last save are pushed (re-reading every line on each pause was slow).
-            let style = titleStyle(in: paragraph.range) ?? ""
+            let format = titleFormat(in: paragraph.range)
             let parentLine = parentID(for: index, in: list)
-            let signature = "\(paragraph.text)|\(paragraph.depth)|\(parentLine?.uuidString ?? "")|\(style)|\(day.key)"
+            let signature = "\(paragraph.text)|\(paragraph.depth)|\(parentLine?.uuidString ?? "")|\(format.style ?? "")|\(format.struck)|\(day.key)"
             if synced[id] == signature { continue }
             synced[id] = signature
             let line = DocLine(kind: kind, id: id, depth: paragraph.depth, title: paragraph.text)
             parent.actions.update(line, paragraph.text, day, parentLine)
-            // Striking an item through is how a doc says "done" (there are no checkboxes while writing).
-            let parts = style.split(separator: " ").map(String.init)
-            if kind == .task {
-                let rest = parts.filter { $0 != "s" }
-                parent.actions.restyle(id, rest.isEmpty ? nil : rest.joined(separator: " "))
-            }
-            parent.actions.strike(line, day, parts.contains("s"))
+            if kind == .task { parent.actions.restyle(id, format.style) }
+            // Striking the whole of an item through is how a doc says "done" (there are no checkboxes while writing).
+            parent.actions.strike(line, day, format.struck)
         }
+        // The store's answers above can redraw the page (an item just made appears on its day): what counts as
+        // "its line is gone" is the page as it is now, never the list read before. (Reading the old list here
+        // once deleted an item the moment it was drawn.)
+        if edits != version { present = Set(paragraphs().compactMap(\.id)) }
         for (id, kind) in kinds where !present.contains(id) && !kind.readOnly && confirmed.contains(id) {
             if let day = lineDays[id] {
                 parent.actions.delete(DocLine(kind: kind, id: id, title: ""), day)
@@ -1021,33 +1145,66 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     /// The formatting of an item line's title, read from its last written character (the time before it is
     /// drawn in its own style, so it's skipped).
-    private func titleStyle(in range: NSRange) -> String? {
-        guard let storage = view?.textStorage else { return nil }
-        let string = storage.string as NSString
-        var index = NSMaxRange(range) - 1
-        while index >= range.location {
-            let character = string.character(at: index)
-            let skip = character == 10 || character == 32 || character == 9
-                || storage.attribute(.asmoTag, at: index, effectiveRange: nil) != nil
-            if !skip { break }
-            index -= 1
-        }
-        guard index >= range.location else { return nil }
-        let attributes = storage.attributes(at: index, effectiveRange: nil)
+    /// The formatting of one stretch of text, as style words (and its link).
+    private func styleWords(_ attributes: [NSAttributedString.Key: Any]) -> (style: String, link: String?) {
         var parts: [String] = []
         if let font = attributes[.font] as? NSFont {
             let traits = NSFontManager.shared.traits(of: font)
-            if traits.contains(.boldFontMask) || NSFontManager.shared.weight(of: font) >= 8 { parts.append("b") }
+            if font.isFixedPitch || font.fontName.lowercased().contains("mono") { parts.append("code") }
+            else if traits.contains(.boldFontMask) || NSFontManager.shared.weight(of: font) >= 8 { parts.append("b") }
             if traits.contains(.italicFontMask) || ((attributes[.obliqueness] as? CGFloat) ?? 0) > 0.05 { parts.append("i") }
         }
-        if attributes[.underlineStyle] != nil { parts.append("u") }
-        // Struck through = done (drawn that way for done items, or struck by the writer).
+        if attributes[.underlineStyle] != nil, attributes[.link] == nil { parts.append("u") }
         if attributes[.strikethroughStyle] != nil { parts.append("s") }
         // A color is the writer's only when it isn't one the page draws with, in either look.
-        if let color = (attributes[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB), !DocCoordinator.isThemeColor(color) {
+        if let color = (attributes[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB), !DocCoordinator.isThemeColor(color), attributes[.link] == nil {
             parts.append(String(format: "#%02X%02X%02X", Int(color.redComponent * 255), Int(color.greenComponent * 255), Int(color.blueComponent * 255)))
         }
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
+        if let background = attributes[.backgroundColor] as? NSColor, !parts.contains("code"), PageMarkdown.isHighlight(background) { parts.append("hl") }
+        let link = (attributes[.link] as? URL)?.absoluteString ?? attributes[.link] as? String
+        return (parts.joined(separator: " "), link)
+    }
+
+    /// A line's words with their formatting, piece by piece (without its bullet, time and tag; trimmed).
+    private func titleRuns(in range: NSRange) -> [TitleRun] {
+        guard let storage = view?.textStorage, NSMaxRange(range) <= storage.length else { return [] }
+        let string = storage.string as NSString
+        var runs: [TitleRun] = []
+        storage.enumerateAttributes(in: range) { attributes, sub, _ in
+            if attributes[.asmoTag] != nil || attributes[.asmoCheck] != nil || attributes[.asmoTime] != nil || attributes[.attachment] != nil { return }
+            let text = string.substring(with: sub).replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\t", with: "")
+            guard !text.isEmpty else { return }
+            let words = styleWords(attributes)
+            if var last = runs.last, last.s == words.style, last.l == words.link {
+                last.t += text
+                runs[runs.count - 1] = last
+            } else {
+                runs.append(TitleRun(t: text, s: words.style, l: words.link))
+            }
+        }
+        // Spaces at the ends aren't part of the title.
+        while let first = runs.first, first.t.trimmingCharacters(in: .whitespaces).isEmpty { runs.removeFirst() }
+        while let last = runs.last, last.t.trimmingCharacters(in: .whitespaces).isEmpty { runs.removeLast() }
+        if !runs.isEmpty {
+            runs[0].t = String(runs[0].t.drop { $0 == " " })
+            while runs[runs.count - 1].t.hasSuffix(" ") { runs[runs.count - 1].t.removeLast() }
+        }
+        return runs
+    }
+
+    /// How a line's title is formatted, as stored, and whether the whole of it is struck through (= done).
+    private func titleFormat(in range: NSRange) -> (style: String?, struck: Bool) {
+        var runs = titleRuns(in: range)
+        let struck = !runs.isEmpty && runs.allSatisfy { $0.s.split(separator: " ").contains("s") }
+        if struck {
+            // Done is the item's state, not a formatting of its words.
+            runs = runs.map { run in
+                var run = run
+                run.s = run.s.split(separator: " ").filter { $0 != "s" }.joined(separator: " ")
+                return run
+            }
+        }
+        return (RichTitle.encode(runs), struck)
     }
 
     /// The lines as drawn match the store: remember them, so the next save only pushes what's edited after.
@@ -1055,8 +1212,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         let list = paragraphs()
         for (index, paragraph) in list.enumerated() where !paragraph.isHeading {
             guard let id = paragraph.id, let day = paragraph.day else { continue }
-            let style = titleStyle(in: paragraph.range) ?? ""
-            synced[id] = "\(paragraph.text)|\(paragraph.depth)|\(parentID(for: index, in: list)?.uuidString ?? "")|\(style)|\(day.key)"
+            let format = titleFormat(in: paragraph.range)
+            synced[id] = "\(paragraph.text)|\(paragraph.depth)|\(parentID(for: index, in: list)?.uuidString ?? "")|\(format.style ?? "")|\(format.struck)|\(day.key)"
         }
     }
 
@@ -1135,6 +1292,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             guard let storage = view.textStorage else { return }
             let batchDay = asking.first?.day ?? parent.anchor
             parent.actions.batch(batchDay, true)
+            // Saving an item refreshes the view; that refresh waits until every line is in place, or it would
+            // draw an item whose line is still being replaced a second time.
+            applying = true
             for original in asking.reversed() {
                 let current = paragraphs()
                 guard let position = current.firstIndex(where: {
@@ -1144,8 +1304,14 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 paragraph.text = Dictation.verbatimMarker + Self.stripMarker(paragraph.text)
                 commitLine(paragraph, day: day, parent: parentID(for: position, in: current), storage: storage)
             }
+            applying = false
             parent.actions.batch(batchDay, false)
             syncEdits()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reconciled = []
+                self.reconcile(self.parent.days)
+            }
             return
         }
         organizingNow = true
@@ -1300,13 +1466,15 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             return .note
         }
         // A line struck through as it was written is a thing already done.
-        let struck = (titleStyle(in: paragraph.range) ?? "").split(separator: " ").contains("s")
-        guard let lines = parent.actions.commit(paragraph.text, day, day, parentTask, struck) else {
+        let format = titleFormat(in: paragraph.range)
+        let struck = format.struck
+        guard var lines = parent.actions.commit(paragraph.text, day, day, parentTask, struck) else {
             mark(paragraph.range, note: true)
             return .note
         }
+        let was = applying
         applying = true
-        defer { applying = false }
+        defer { applying = was }
         if lines.isEmpty {
             // Everything went to other days (or it was a command): leave an empty line where the writing was.
             let hasBreak = (storage.string as NSString).substring(with: paragraph.range).hasSuffix("\n")
@@ -1314,17 +1482,22 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             storage.replaceCharacters(in: blank, with: NSAttributedString(string: "", attributes: bodyAttributes))
             return .cleared(paragraph.range.location)
         }
+        // The line keeps the formatting it was written with (bold words, links): the item is drawn with it now and
+        // the next save stores it.
+        if lines.count == 1, lines[0].kind == .task { lines[0].style = format.style }
         let replacement = NSMutableAttributedString()
         for line in lines {
             var line = line
             line.depth = paragraph.depth
             replacement.append(render(line, day: day))
+            if line.style != nil { synced[line.id] = nil; drawn[line.id] = nil }
         }
         let hadBreak = (storage.string as NSString).substring(with: paragraph.range).hasSuffix("\n")
         if !hadBreak, replacement.string.hasSuffix("\n") {
             replacement.deleteCharacters(in: NSRange(location: replacement.length - 1, length: 1))
         }
         storage.replaceCharacters(in: paragraph.range, with: replacement)
+        if lines.contains(where: { $0.style != nil }) { scheduleSync() }
         resetUndo()
         return .replaced(NSRange(location: paragraph.range.location, length: replacement.length))
     }

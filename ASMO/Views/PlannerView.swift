@@ -2924,7 +2924,11 @@ struct PlannerView: View {
                 return true
             },
             restyle: { id, style in
-                guard let task = tasks.first(where: { $0.id.uuidString == id }), task.titleStyle != style else { return }
+                // An item made a moment ago may not be in the query yet: look it up in the store.
+                let uuid = UUID(uuidString: id)
+                let task = tasks.first(where: { $0.id == uuid })
+                    ?? uuid.flatMap { key in try? context.fetch(FetchDescriptor<TaskRecord>(predicate: #Predicate { $0.id == key })).first }
+                guard let task, task.titleStyle != style else { return }
                 task.titleStyle = style
                 persist()
             },
@@ -3122,10 +3126,13 @@ struct PlannerView: View {
                             tag: RoutineParser.label(draft.weekdays))]
         }
         let draft = CaptureParser.manual(written, clock: relative, selectedDay: day)
-        // A date it couldn't pin down stays in the words: nothing is asked, nothing is guessed.
-        let sure = !draft.requiresReview || draft.action != .task
+        // A date or time counts only where a writer puts one on purpose: at the start of the line ("明天 交材料",
+        // "下午3点开会"). In the middle of a sentence ("订周五的票") it is part of the words, and the line stays whole,
+        // on this day. A date it couldn't pin down stays in the words too: nothing is asked, nothing is guessed.
+        let leads = !draft.title.trimmed.isEmpty && draft.title != written && written.hasSuffix(draft.title)
+        let sure = leads && (!draft.requiresReview || draft.action != .task)
         let schedule = sure ? (draft.schedule ?? day) : day
-        let title = sure && !draft.title.trimmed.isEmpty ? draft.title : written
+        let title = sure ? draft.title : written
         let task = TaskRecord(id: draft.id, title: title, schedule: schedule, endMinute: schedule.hour == nil ? nil : draft.endMinute)
         task.sourceText = written == title ? nil : written
         task.completed = done
@@ -3316,9 +3323,16 @@ struct PlannerView: View {
 
     /// An item line was edited in the document: its text (with any time typed in it) becomes the item.
     private func updateDocumentLine(_ line: DocLine, text: String, day: PlanDate, parent: UUID?) {
-        let parsed = CaptureParser.manual(text, clock: clock, selectedDay: day)
+        var parsed = CaptureParser.manual(text, clock: clock, selectedDay: day)
+        // Keep the user's words exactly; only a time or date written at the start of the line is taken out of the
+        // title ("15:00 开会"). One in the middle of the sentence ("订周五的票") is part of the words.
+        let leads = !parsed.title.trimmed.isEmpty && text.trimmed.hasSuffix(parsed.title.trimmed)
+        if !leads {
+            parsed.title = text.trimmed
+            parsed.schedule = day.dayOnly
+            parsed.endMinute = nil
+        }
         let minute = parsed.schedule?.hour.map { $0 * 60 + (parsed.schedule?.minute ?? 0) }
-        // Keep the user's words exactly; only a time or date they typed is taken out of the title.
         let tookTime = parsed.title != text.trimmed
         let title = tookTime && !parsed.title.trimmed.isEmpty ? parsed.title.trimmed : text.trimmed
         switch line.kind {

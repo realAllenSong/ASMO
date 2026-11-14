@@ -122,23 +122,59 @@ final class PageController: ObservableObject {
         textView.setSelectedRange(NSRange(location: end + 4, length: 0))
     }
 
-    /// Links the selection to the URL on the clipboard (or to the selected text when it is itself a URL).
+    /// Links the selected words: a small box by the selection asks for the address (filled in from the clipboard
+    /// when a link was just copied; Return confirms). Selected text that is itself an address is linked at once.
     func link() {
         guard let textView, let storage = textView.textStorage else { return }
         let range = textView.selectedRange()
         let selected = (storage.string as NSString).substring(with: range).trimmed
-        let candidate = NSPasteboard.general.string(forType: .string)?.trimmed ?? ""
-        let raw = selected.hasPrefix("http") ? selected : candidate
-        guard let url = URL(string: raw), url.scheme?.hasPrefix("http") == true else {
-            NSSound.beep()
-            return
-        }
+        if let url = Self.address(selected), selected.hasPrefix("http") { setLink(url, range: range, text: nil); return }
+        let probe = min(range.location, max(0, storage.length - 1))
+        let existing = storage.length > 0 ? (storage.attribute(.link, at: probe, effectiveRange: nil) as? URL)?.absoluteString
+            ?? storage.attribute(.link, at: probe, effectiveRange: nil) as? String : nil
+        let copied = NSPasteboard.general.string(forType: .string)?.trimmed ?? ""
+        let suggestion = existing ?? (copied.hasPrefix("http") && Self.address(copied) != nil ? copied : "")
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let dark = textView.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        popover.contentViewController = NSHostingController(rootView: LinkBox(address: suggestion, hasLink: existing != nil, theme: PlannerTheme(dark: dark)) { [weak self, weak popover] address in
+            popover?.close()
+            guard let self else { return }
+            if let address { if let url = Self.address(address) { self.setLink(url, range: range, text: range.length == 0 ? address : nil) } }
+            else { self.setLink(nil, range: range, text: nil) }
+            self.textView?.window?.makeFirstResponder(self.textView)
+        })
+        var rect = textView.firstRect(forCharacterRange: range, actualRange: nil)
+        rect = textView.window?.convertFromScreen(rect) ?? rect
+        rect = textView.convert(rect, from: nil)
+        if rect.width < 1 { rect.size.width = 1 }
+        popover.show(relativeTo: rect, of: textView, preferredEdge: .maxY)
+    }
+
+    /// "example.com/page" → https://example.com/page; nil when it isn't an address.
+    static func address(_ text: String) -> URL? {
+        let raw = text.trimmed
+        guard !raw.isEmpty, !raw.contains(" "), raw.contains(".") || raw.contains(":") else { return nil }
+        let full = raw.contains("://") || raw.hasPrefix("mailto:") ? raw : "https://" + raw
+        return URL(string: full)
+    }
+
+    /// Adds, changes or (nil) removes the link on a range; with no selection the address itself is inserted, linked.
+    private func setLink(_ url: URL?, range: NSRange, text: String?) {
+        guard let textView, let storage = textView.textStorage, NSMaxRange(range) <= storage.length else { return }
         edit {
             if range.length > 0 {
-                storage.addAttribute(.link, value: url, range: range)
-            } else {
-                let text = NSAttributedString(string: raw, attributes: textView.typingAttributes.merging([.link: url]) { $1 })
-                storage.insert(text, at: range.location)
+                if let url { storage.addAttribute(.link, value: url, range: range) }
+                else { storage.removeAttribute(.link, range: range) }
+            } else if let url, let text {
+                storage.insert(NSAttributedString(string: text, attributes: textView.typingAttributes.merging([.link: url]) { $1 }), at: range.location)
+            } else if url == nil, storage.length > 0 {
+                // The cursor sits in a link: the whole link goes.
+                var whole = NSRange()
+                if storage.attribute(.link, at: min(range.location, storage.length - 1), longestEffectiveRange: &whole,
+                                     in: NSRange(location: 0, length: storage.length)) != nil {
+                    storage.removeAttribute(.link, range: whole)
+                }
             }
         }
     }
@@ -588,7 +624,7 @@ struct PageToolbar: View {
             tool("list.bullet", "项目符号", { controller.toggleLinePrefix("• ") })
             tool("checklist", "勾选框", { controller.toggleLinePrefix("☐ ") })
             tool("repeat", "设为每天重复（这一行）· 也可以写「每天…」或「… #每周一三」", controller.makeRepeating)
-            tool("link", "链接（先复制网址）", controller.link)
+            tool("link", "链接 ⌘K", controller.link)
             tool("photo", "插入图片", controller.insertImage)
             if let organize {
             Spacer(minLength: 8)
@@ -652,7 +688,7 @@ struct SelectionBar: View {
             dot(NSColor(theme.accent), "标紫")
             tool("eraser", "恢复默认颜色") { controller.color(nil) }
             Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
-            tool("link", "链接（先复制网址）", controller.link)
+            tool("link", "链接 ⌘K", controller.link)
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -680,6 +716,34 @@ struct SelectionBar: View {
         .buttonStyle(DesktopButtonStyle(theme: theme))
         .help(help.localized)
         .accessibilityLabel(help.localized)
+    }
+}
+/// The address box that opens by the selection when linking.
+struct LinkBox: View {
+    @State var address: String
+    let hasLink: Bool
+    let theme: PlannerTheme
+    /// The address to link to, or nil to remove the link.
+    let done: (String?) -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "link").font(.system(size: 12, weight: .medium)).foregroundStyle(theme.quiet)
+            TextField("粘贴或输入网址", text: $address)
+                .textFieldStyle(.plain).font(.system(size: 13)).frame(width: 260)
+                .focused($focused)
+                .onSubmit { if !address.trimmed.isEmpty { done(address) } }
+            if hasLink {
+                Button("移除") { done(nil) }.buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(theme.quiet)
+            }
+            Button("链接") { done(address) }
+                .buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(address.trimmed.isEmpty ? theme.quiet : theme.accent)
+                .disabled(address.trimmed.isEmpty)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .onAppear { focused = true }
     }
 }
 #endif
