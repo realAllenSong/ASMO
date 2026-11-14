@@ -515,10 +515,18 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             self.pendingSync?.cancel()
             self.syncEdits()
         }
+        for name in [NSApplication.willResignActiveNotification, NSApplication.willTerminateNotification] {
+            leaving.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.saveNow()
+            })
+        }
     }
+
+    private var leaving: [NSObjectProtocol] = []
 
     deinit {
         if let agentWrites { NotificationCenter.default.removeObserver(agentWrites) }
+        for observer in leaving { NotificationCenter.default.removeObserver(observer) }
     }
 
     /// True right after an organize pass: ⌘Z on the page undoes it (until the page is rebuilt).
@@ -877,16 +885,34 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: min(view.selectedRange().location, storage.length - 1), length: 0))
             Self.strikeQuietly(storage, in: paragraph, quiet: quiet, ink: ink)
         }
-        pendingSync?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.syncEdits() }
-        pendingSync = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
+        scheduleSync()
         // A pause in writing is when the finished lines get organized (never the line being written).
         idleOrganize?.cancel()
         guard parent.organizeWhenIdle else { return }
         let idle = DispatchWorkItem { [weak self] in self?.organize(includingCurrent: false) }
         idleOrganize = idle
         DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: idle)
+    }
+
+    /// Nothing is saved or organized while the writer is writing: the page is saved once the keys have been
+    /// quiet for a while (and never in the middle of an input-method composition). Leaving the day, the page or
+    /// the app saves at once.
+    private func scheduleSync() {
+        pendingSync?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.view?.hasMarkedText() == true { self.scheduleSync(); return }
+            self.syncEdits()
+        }
+        pendingSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
+
+    /// Saves now if something is waiting (the app is going to the background or quitting).
+    func saveNow() {
+        guard let pending = pendingSync, !pending.isCancelled else { return }
+        pending.cancel()
+        syncEdits()
     }
 
     /// Pushes edited item lines to the store, deletes items whose lines are gone, and saves notes.
@@ -1661,6 +1687,25 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         return NSRange(location: below, length: 0)
     }
 
+    /// The day a position is in: the nearest date heading above it. Looked up on every cursor move, so it only
+    /// walks up the few lines to that heading (never reads the whole page).
+    private func day(at location: Int) -> PlanDate? {
+        guard let storage = view?.textStorage, storage.length > 0 else { return nil }
+        let string = storage.string as NSString
+        var probe = min(location, string.length - 1)
+        while true {
+            let paragraph = string.paragraphRange(for: NSRange(location: probe, length: 0))
+            if let key = storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) as? String {
+                if let known = dayKeys[key] { return known }
+                let day = JournalDays.date(forKey: key)
+                dayKeys[key] = day
+                return day
+            }
+            guard paragraph.location > 0 else { return nil }
+            probe = paragraph.location - 1
+        }
+    }
+
     func textViewDidChangeSelection(_ notification: Notification) {
         guard let textView = notification.object as? NSTextView, !applying else { return }
         // The format bar follows a selection made with the keyboard too (a mouse selection shows it on mouse up).
@@ -1668,7 +1713,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         cleanTypingAttributes(textView)
         // The cursor moved to another day: what was written in the day it left is organized now.
         if !parent.organizeWhenIdle {
-            let day = paragraphs().last(where: { $0.isHeading && $0.range.location <= textView.selectedRange().location })?.day
+            let day = self.day(at: textView.selectedRange().location)
             if let day, day != cursorDay {
                 let left = cursorDay
                 cursorDay = day
