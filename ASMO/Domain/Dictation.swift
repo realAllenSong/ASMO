@@ -35,6 +35,10 @@ enum Dictation {
         return items
     }
 
+    /// Marks a line typed on the page: it becomes one item with the writer's words exactly as typed (only a date
+    /// or time in it is read). Never cleaned, split, matched to other items or taken as a command.
+    static let verbatimMarker = "\u{1D}"
+
     /// Marks a piece the organizer already wrote as exactly one item ("<date> <HH:MM-HH:MM> <title>"):
     /// it is read whole — never split at "、" or "和", never taken as a command.
     static let wholeMarker = "\u{1E}"

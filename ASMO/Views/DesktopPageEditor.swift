@@ -635,4 +635,51 @@ struct PageToolbar: View {
         .accessibilityLabel(help.localized)
     }
 }
+/// The few things one does to selected words, right where they are: shown next to a selection, gone when it goes.
+struct SelectionBar: View {
+    let controller: PageController
+    let theme: PlannerTheme
+
+    var body: some View {
+        HStack(spacing: 1) {
+            tool("bold", "加粗 ⌘B", controller.toggleBold)
+            tool("italic", "斜体 ⌘I", controller.toggleItalic)
+            tool("underline", "下划线 ⌘U", controller.toggleUnderline)
+            tool("strikethrough", "删除线（待办划掉就是完成）", controller.toggleStrike)
+            Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
+            tool("highlighter", "高亮", controller.highlight)
+            dot(.systemRed, "标红")
+            dot(NSColor(theme.accent), "标紫")
+            tool("eraser", "恢复默认颜色") { controller.color(nil) }
+            Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
+            tool("link", "链接（先复制网址）", controller.link)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
+        .shadow(color: .black.opacity(theme.dark ? 0.45 : 0.14), radius: 10, y: 4)
+        .padding(12)   // room for the shadow
+    }
+
+    private func tool(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(theme.ink.opacity(0.85))
+                .frame(width: 30, height: 28).contentShape(Rectangle())
+        }
+        .buttonStyle(DesktopButtonStyle(theme: theme))
+        .help(help.localized)
+        .accessibilityLabel(help.localized)
+    }
+
+    private func dot(_ color: NSColor, _ help: String) -> some View {
+        Button { controller.color(color) } label: {
+            Circle().fill(Color(nsColor: color)).frame(width: 13, height: 13)
+                .frame(width: 28, height: 28).contentShape(Rectangle())
+        }
+        .buttonStyle(DesktopButtonStyle(theme: theme))
+        .help(help.localized)
+        .accessibilityLabel(help.localized)
+    }
+}
 #endif

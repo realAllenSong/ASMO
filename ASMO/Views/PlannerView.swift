@@ -881,6 +881,20 @@ struct PlannerView: View {
                 view.insertText(String(character), replacementRange: view.selectedRange())
             }
         case "key": view.doCommand(by: Selector(rest))
+        case "barclick":
+            // "barclick:N": a click on the Nth button (from 0) of the bar next to the selection, sent to this
+            // window only (the real mouse isn't touched).
+            guard let bar = view.subviews.first(where: { String(describing: type(of: $0)).contains("NSHostingView") }), !bar.isHidden,
+                  let window = view.window, let index = Int(rest) else {
+                try? "no bar".write(to: out, atomically: true, encoding: .utf8); return
+            }
+            let point = bar.convert(NSPoint(x: 12 + 6 + 15 + CGFloat(index) * 31, y: bar.bounds.midY), to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    window.sendEvent(event)
+                }
+            }
         case "paste", "pastefile", "pastehtml":
             // A private pasteboard (never the user's clipboard): "paste:TEXT" (\n for new lines),
             // "pastefile:/path" (as from Finder), "pastehtml:/path/page.html" (as from a browser).
@@ -2997,6 +3011,9 @@ struct PlannerView: View {
 
     private func commitDocumentLine(_ text: String, day: PlanDate, page: PlanDate? = nil, parent: UUID?, done: Bool = false) -> [DocLine]? {
         let relative = pageClock(organizingBase ?? page ?? editingDay ?? documentDay ?? day)
+        if text.hasPrefix(Dictation.verbatimMarker) {
+            return commitWrittenLine(String(text.dropFirst(Dictation.verbatimMarker.count)), day: day, clock: relative, parent: parent, done: done)
+        }
         // The organizer already wrote this as exactly one item: read it whole, never as a command.
         let whole = text.hasPrefix(Dictation.wholeMarker)
         if !whole, let command = PlannerCommand.parse(text, clock: relative, defaultDay: day) {
@@ -3085,6 +3102,46 @@ struct PlannerView: View {
             announce(elsewhere.count == 1 ? String(localized: "已记到 \(friendlyDay(first))") : String(localized: "\(elsewhere.count) 件记到了别的日子"))
         }
         return here
+    }
+
+    /// A line typed on the page becomes one item, in the writer's own words. "每天…" is a repeating item; a date
+    /// or time in the line is where and when it goes (and is the only thing taken out of the title).
+    private func commitWrittenLine(_ text: String, day: PlanDate, clock relative: CaptureClock, parent: UUID?, done: Bool) -> [DocLine]? {
+        let written = text.trimmed
+        guard !written.isEmpty else { return nil }
+        if let draft = RoutineParser.parse(written, clock: relative),
+           !routines.contains(where: { $0.endDay == nil && $0.weekdays == draft.weekdays && Dictation.sameThing($0.title, draft.title) }) {
+            let routine = RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
+                                        endMinute: draft.endMinute, startDay: clock.today.key,
+                                        order: (routines.map(\.order).max() ?? 0) + 1)
+            context.insert(routine)
+            persist()
+            guard day == clock.today, routine.applies(to: day, calendar: clock.calendar) else { return [] }
+            return [DocLine(kind: .routine, id: routine.id.uuidString + "|" + day.key,
+                            time: draft.startMinute.map { PlannerClockTime.label($0) }, title: draft.title,
+                            tag: RoutineParser.label(draft.weekdays))]
+        }
+        let draft = CaptureParser.manual(written, clock: relative, selectedDay: day)
+        // A date it couldn't pin down stays in the words: nothing is asked, nothing is guessed.
+        let sure = !draft.requiresReview || draft.action != .task
+        let schedule = sure ? (draft.schedule ?? day) : day
+        let title = sure && !draft.title.trimmed.isEmpty ? draft.title : written
+        let task = TaskRecord(id: draft.id, title: title, schedule: schedule, endMinute: schedule.hour == nil ? nil : draft.endMinute)
+        task.sourceText = written == title ? nil : written
+        task.completed = done
+        let target = schedule.dayOnly
+        if target == day { task.parentID = parent }
+        context.insert(task)
+        OrganizeBatch.current?.created.append(task.id)
+        persist()
+        guard target == day else {
+            announce(String(localized: "已记到 \(friendlyDay(target))"))
+            return []
+        }
+        let minute = schedule.hour.map { $0 * 60 + (schedule.minute ?? 0) }
+        return [DocLine(kind: .task, id: task.id.uuidString,
+                        time: minute.map { PlannerClockTime.label($0) + (task.endMinute.map { "–" + PlannerClockTime.label($0) } ?? "") },
+                        title: title, done: done)]
     }
 
     // MARK: Organizing context, batches and undo

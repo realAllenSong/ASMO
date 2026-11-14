@@ -121,7 +121,9 @@ extension NSAttributedString.Key {
 /// Writing is plain typing; finished lines become items without asking.
 enum NoteRule {
     static func stripMarker(_ text: String) -> String {
-        for marker in ["• ", "◦ ", "▪ ", "☐ ", "☑ ", "- ", "* "] where text.hasPrefix(marker) { return String(text.dropFirst(marker.count)) }
+        for marker in ["• ", "◦ ", "▪ ", "‣ ", "☐ ", "☑ ", "- ", "* "] where text.hasPrefix(marker) {
+            return String(text.dropFirst(marker.count).drop { $0 == " " })
+        }
         // A numbered list ("1.", "2)", "i.", "iv.", "a)"): the number is the list's, not the item's.
         if let range = text.range(of: #"^(?:\d{1,2}|[ivx]{1,4}|[a-h])[.)、]\s+"#, options: [.regularExpression, .caseInsensitive]) {
             return String(text[range.upperBound...])
@@ -160,6 +162,8 @@ struct DayDocumentView: NSViewRepresentable {
     /// Organize finished lines after a pause in typing. Off: only when the cursor leaves the day, the page loses
     /// focus or ⌘↵ (nothing changes under the writer while they are still thinking).
     var organizeWhenIdle = true
+    /// Typed lines become items word for word (no model, no rewording).
+    var verbatim = true
 
     func makeCoordinator() -> DocCoordinator { DocCoordinator(self) }
 
@@ -346,7 +350,71 @@ final class DocTextView: NSTextView {
         return ok
     }
 
+    // MARK: The bar next to a selection
+
+    private var selectionBar: NSHostingView<SelectionBar>?
+    private var selectionBarWork: DispatchWorkItem?
+
+    /// Shows the format bar by the selected words (once the mouse is up and the selection has settled), or hides it.
+    func refreshSelectionBar(after delay: TimeInterval = 0.12) {
+        selectionBarWork?.cancel()
+        guard selectedRange().length > 0 else { hideSelectionBar(); return }
+        let work = DispatchWorkItem { [weak self] in self?.placeSelectionBar() }
+        selectionBarWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func hideSelectionBar() {
+        selectionBarWork?.cancel()
+        guard let bar = selectionBar, !bar.isHidden else { return }
+        bar.isHidden = true
+    }
+
+    private func placeSelectionBar() {
+        let selection = selectedRange()
+        guard selection.length > 0, NSEvent.pressedMouseButtons & 1 == 0, window?.firstResponder === self,
+              let coordinator, let controller = coordinator.parent.controller,
+              let layout = layoutManager, let container = textContainer, let storage = textStorage else { hideSelectionBar(); return }
+        // Only words: a selection of nothing but line breaks or pictures has nothing to format.
+        let text = (storage.string as NSString).substring(with: selection)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { hideSelectionBar(); return }
+        let bar: NSHostingView<SelectionBar>
+        if let existing = selectionBar {
+            bar = existing
+            bar.rootView = SelectionBar(controller: controller, theme: coordinator.parent.theme)
+        } else {
+            bar = NSHostingView(rootView: SelectionBar(controller: controller, theme: coordinator.parent.theme))
+            addSubview(bar)
+            selectionBar = bar
+        }
+        let size = bar.fittingSize
+        let glyphs = layout.glyphRange(forCharacterRange: selection, actualCharacterRange: nil)
+        let origin = textContainerOrigin
+        // The first and last lines of the selection.
+        let first = layout.lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let last = layout.lineFragmentUsedRect(forGlyphAt: max(glyphs.location, NSMaxRange(glyphs) - 1), effectiveRange: nil)
+        let startX = layout.boundingRect(forGlyphRange: NSRange(location: glyphs.location, length: 1), in: container).minX
+        let whole = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        let middle = first.minY == last.minY ? whole.midX : (startX + first.maxX) / 2
+        var x = origin.x + middle - size.width / 2
+        x = max(0, min(x, bounds.width - size.width))
+        // Above the selection; below it when the top of the window is in the way.
+        var y = origin.y + first.minY - size.height + 6
+        if y < visibleRect.minY { y = origin.y + last.maxY - 6 }
+        bar.frame = NSRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
+        if bar.isHidden || bar.alphaValue < 1 {
+            bar.isHidden = false
+            bar.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.14
+                bar.animator().alphaValue = 1
+            }
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
+        hideSelectionBar()
+        defer { refreshSelectionBar(after: 0.05) }
         // Clicking a checkbox toggles the item instead of placing the cursor.
         let point = convert(event.locationInWindow, from: nil)
         if let index = characterIndex(at: point), let storage = textStorage, index < storage.length,
@@ -724,7 +792,18 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         var isNote: Bool
     }
 
+    /// The page read back line by line. Reading the whole page costs real time and happens on every pause and
+    /// cursor move, so the result is kept until the text changes.
+    private var paragraphCache: (edits: Int, list: [Paragraph])?
+
     func paragraphs() -> [Paragraph] {
+        if let cached = paragraphCache, cached.edits == edits { return cached.list }
+        let list = readParagraphs()
+        paragraphCache = (edits, list)
+        return list
+    }
+
+    private func readParagraphs() -> [Paragraph] {
         guard let storage = view?.textStorage else { return [] }
         let string = storage.string as NSString
         var result: [Paragraph] = []
@@ -791,6 +870,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         guard !applying else { return }
+        if view?.selectedRange().length == 0 { view?.hideSelectionBar() }
         // (Markdown as you type is handled before the change, in markdownShortcut, so it can be undone.)
         // Struck words go quiet right away, however they were struck (toolbar, ⌘ key, ~~ ~~).
         if let view, let storage = view.textStorage, storage.length > 0 {
@@ -800,7 +880,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         pendingSync?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.syncEdits() }
         pendingSync = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
         // A pause in writing is when the finished lines get organized (never the line being written).
         idleOrganize?.cancel()
         guard parent.organizeWhenIdle else { return }
@@ -1023,6 +1103,25 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
             }
         }
         guard !asking.isEmpty else { syncEdits(); return }
+        if parent.verbatim {
+            // What was typed stays as typed: each finished line is one item in the writer's words. No model, no
+            // rewording, no splitting, nothing moved under something else.
+            guard let storage = view.textStorage else { return }
+            let batchDay = asking.first?.day ?? parent.anchor
+            parent.actions.batch(batchDay, true)
+            for original in asking.reversed() {
+                let current = paragraphs()
+                guard let position = current.firstIndex(where: {
+                    $0.id == nil && !$0.isHeading && $0.range.location == original.range.location && $0.text == original.text
+                }), let day = current[position].day else { continue }
+                var paragraph = current[position]
+                paragraph.text = Dictation.verbatimMarker + Self.stripMarker(paragraph.text)
+                commitLine(paragraph, day: day, parent: parentID(for: position, in: current), storage: storage)
+            }
+            parent.actions.batch(batchDay, false)
+            syncEdits()
+            return
+        }
         organizingNow = true
         parent.actions.organizing(true)
         // Indentation goes along (a tab per level): an indented line is a sub-point of the one above.
@@ -1169,11 +1268,14 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     @discardableResult
     private func commitLine(_ paragraph: Paragraph, day: PlanDate, parent parentTask: UUID?, storage: NSTextStorage) -> Committed {
-        if DocCoordinator.looksLikeNote(paragraph.text, heading: isHeadingStyled(paragraph.range)) || containsAttachment(paragraph.range) {
+        let plain = paragraph.text.replacingOccurrences(of: Dictation.verbatimMarker, with: "")
+        if DocCoordinator.looksLikeNote(plain, heading: isHeadingStyled(paragraph.range)) || containsAttachment(paragraph.range) {
             mark(paragraph.range, note: true)
             return .note
         }
-        guard let lines = parent.actions.commit(paragraph.text, day, day, parentTask, false) else {
+        // A line struck through as it was written is a thing already done.
+        let struck = (titleStyle(in: paragraph.range) ?? "").split(separator: " ").contains("s")
+        guard let lines = parent.actions.commit(paragraph.text, day, day, parentTask, struck) else {
             mark(paragraph.range, note: true)
             return .note
         }
@@ -1230,36 +1332,114 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
                 organize(includingCurrent: true)
                 return true
             }
-            // Writing stays free: Return is just a new line at the same indent (lists continue).
+            // Lists continue, like in any doc: Return after a bullet (an item or one just typed) starts the next
+            // bullet at the same level; Return on an empty bullet steps out a level, then out of the list.
             let raw = string.substring(with: paragraph).trimmingCharacters(in: .newlines)
             let indent = String(raw.prefix { $0 == "\t" })
-            var marker = ""
-            let isItem = storage.attribute(.asmoLine, at: min(paragraph.location, max(0, string.length - 1)), effectiveRange: nil) != nil
-            if !isItem {
-                let body = raw.dropFirst(indent.count)
-                for candidate in ["• ", "☐ ", "☑ "] where body.hasPrefix(candidate) {
-                    if body.count == candidate.count {
-                        textView.insertText("", replacementRange: NSRange(location: paragraph.location, length: raw.utf16.count))
-                        return true
-                    }
-                    marker = candidate == "☑ " ? "☐ " : candidate
-                }
+            let body = String(raw.dropFirst(indent.count))
+            let isItem = string.length > 0 && storage.attribute(.asmoLine, at: min(paragraph.location, string.length - 1), effectiveRange: nil) != nil
+            let selection = textView.selectedRange()
+            // At the very start of a line: push the line down, nothing else.
+            if selection.length == 0, cursor == paragraph.location, !raw.isEmpty {
+                textView.insertText(NSAttributedString(string: "\n", attributes: bodyAttributes), replacementRange: selection)
+                textView.setSelectedRange(NSRange(location: cursor, length: 0))
+                return true
             }
-            textView.insertText(NSAttributedString(string: "\n" + indent + marker, attributes: bodyAttributes),
-                                replacementRange: textView.selectedRange())
+            var marker: NSAttributedString?
+            if isItem {
+                marker = bullet(depth: indent.count)
+            } else if let glyph = body.first, Self.bulletGlyphs.contains(String(glyph)) || glyph == "☐" || glyph == "☑" {
+                if String(body.dropFirst()).trimmed.isEmpty {
+                    // An empty bullet: one level out, or out of the list.
+                    let range = NSRange(location: paragraph.location, length: raw.utf16.count)
+                    if indent.isEmpty {
+                        textView.insertText(NSAttributedString(string: "", attributes: bodyAttributes), replacementRange: range)
+                    } else {
+                        let out = NSMutableAttributedString(string: String(indent.dropLast()), attributes: bodyAttributes)
+                        out.append(glyph == "☐" || glyph == "☑" ? NSAttributedString(string: "☐ ", attributes: bodyAttributes) : bullet(depth: indent.count - 1))
+                        textView.insertText(out, replacementRange: range)
+                    }
+                    textView.typingAttributes = bodyAttributes
+                    return true
+                }
+                marker = glyph == "☐" || glyph == "☑" ? NSAttributedString(string: "☐ ", attributes: bodyAttributes) : bullet(depth: indent.count)
+            }
+            let line = NSMutableAttributedString(string: "\n" + indent, attributes: bodyAttributes)
+            if let marker { line.append(marker) }
+            textView.insertText(line, replacementRange: selection)
             textView.typingAttributes = bodyAttributes
             return true
         case #selector(NSResponder.insertTab(_:)):
-            textView.insertText("\t", replacementRange: NSRange(location: paragraph.location, length: 0))
+            shiftLevel(textView, by: 1)
             return true
         case #selector(NSResponder.insertBacktab(_:)):
-            if string.length > paragraph.location, string.character(at: paragraph.location) == 9 {
-                textView.insertText("", replacementRange: NSRange(location: paragraph.location, length: 1))
-            }
+            shiftLevel(textView, by: -1)
             return true
         default:
             return false
         }
+    }
+
+    /// Bullets by level, the same for items and for bullets being typed.
+    static let bulletGlyphs = ["•", "◦", "▪", "‣"]
+
+    /// A bullet as typed text (it looks like an item's bullet, so nothing shifts when the line becomes one).
+    func bullet(depth: Int) -> NSAttributedString {
+        let text = NSMutableAttributedString(string: Self.bulletGlyphs[max(0, min(depth, 3))],
+                                             attributes: bodyAttributes.merging([.foregroundColor: accent.withAlphaComponent(0.85)]) { $1 })
+        text.append(NSAttributedString(string: "  ", attributes: bodyAttributes))
+        return text
+    }
+
+    /// Tab / ⇧Tab: every line in the selection goes a level in or out, and its bullet follows the level.
+    private func shiftLevel(_ textView: NSTextView, by step: Int) {
+        guard let storage = textView.textStorage, storage.length > 0 else { return }
+        let string = storage.string as NSString
+        let selection = textView.selectedRange()
+        let covered = string.paragraphRange(for: NSRange(location: min(selection.location, string.length), length: selection.length))
+        var starts: [Int] = []
+        var location = covered.location
+        repeat {
+            let paragraph = string.paragraphRange(for: NSRange(location: min(location, string.length - 1), length: 0))
+            let fixed = storage.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil
+                || ((storage.attribute(.asmoKind, at: paragraph.location, effectiveRange: nil) as? String).flatMap(DocLine.Kind.init)?.readOnly ?? false)
+            if !fixed { starts.append(paragraph.location) }
+            location = NSMaxRange(paragraph)
+            if paragraph.length == 0 { break }
+        } while location < NSMaxRange(covered)
+        guard !starts.isEmpty else { return }
+        let undo = textView.undoManager
+        undo?.beginUndoGrouping()
+        var caret = selection.location
+        for start in starts.reversed() {
+            let now = storage.string as NSString
+            let paragraph = now.paragraphRange(for: NSRange(location: start, length: 0))
+            let raw = now.substring(with: paragraph)
+            let depth = raw.prefix { $0 == "\t" }.count
+            let next = max(0, min(3, depth + step))
+            guard next != depth else { continue }
+            // The bullet after the tabs takes the new level's shape (an item's bullet keeps its markers).
+            let glyphAt = start + depth
+            if glyphAt < now.length, Self.bulletGlyphs.contains(now.substring(with: NSRange(location: glyphAt, length: 1))) {
+                var attributes = storage.attributes(at: glyphAt, effectiveRange: nil)
+                attributes[.paragraphStyle] = bodyAttributes[.paragraphStyle]
+                textView.insertText(NSAttributedString(string: Self.bulletGlyphs[next], attributes: attributes),
+                                    replacementRange: NSRange(location: glyphAt, length: 1))
+            }
+            if step > 0 {
+                // The tab takes the line's own markers, so an item's line stays one line of that item.
+                var attributes = storage.attributes(at: start, effectiveRange: nil)
+                for key in [NSAttributedString.Key.asmoCheck, .asmoTag, .attachment, .cursor, .link] { attributes[key] = nil }
+                attributes[.font] = bodyFont
+                textView.insertText(NSAttributedString(string: "\t", attributes: attributes), replacementRange: NSRange(location: start, length: 0))
+                if start <= caret { caret += 1 }
+            } else {
+                textView.insertText("", replacementRange: NSRange(location: start, length: 1))
+                if start < caret { caret -= 1 }
+            }
+        }
+        undo?.endUndoGrouping()
+        if selection.length == 0 { textView.setSelectedRange(NSRange(location: min(caret, storage.length), length: 0)) }
     }
 
     /// The parts of the page that are fixed: each day's heading (with the line breaks on both sides, so it can't be
@@ -1386,8 +1566,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
         if typed == " " || typed == "\u{3000}" {
             let bullets = ["-": "• ", "*": "• ", "+": "• ", "[]": "☐ ", "[ ]": "☐ ", "【】": "☐ ", "[x]": "☑ ", "[X]": "☑ "]
             if let marker = bullets[typedBody] {
-                textView.insertText(NSAttributedString(string: marker, attributes: body),
+                textView.insertText(marker == "• " ? bullet(depth: indent.count) : NSAttributedString(string: marker, attributes: body),
                                     replacementRange: NSRange(location: lineStart, length: typedBody.utf16.count))
+                textView.typingAttributes = bodyAttributes
                 return true
             }
             let sizes: [String: CGFloat] = ["#": 19, "##": 17, "###": 16]
@@ -1482,6 +1663,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         guard let textView = notification.object as? NSTextView, !applying else { return }
+        // The format bar follows a selection made with the keyboard too (a mouse selection shows it on mouse up).
+        if NSEvent.pressedMouseButtons & 1 == 0 { (textView as? DocTextView)?.refreshSelectionBar(after: 0.25) }
         cleanTypingAttributes(textView)
         // The cursor moved to another day: what was written in the day it left is organized now.
         if !parent.organizeWhenIdle {
