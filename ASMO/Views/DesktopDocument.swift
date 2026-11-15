@@ -216,18 +216,43 @@ struct DayDocumentView: NSViewRepresentable {
     var organizeWhenIdle = true
     /// Typed lines become items word for word (no model, no rewording).
     var verbatim = true
+    /// Scrolls itself (the home document: a native scroll view, so years of text scroll smoothly). Off: the page
+    /// is as tall as its text and sits in the caller's scroll view.
+    var scrolls = false
+    /// Reports the day at the top of the window as the reader scrolls (the contents sidebar follows it).
+    var visibleDay: ((PlanDate) -> Void)?
 
     func makeCoordinator() -> DocCoordinator { DocCoordinator(self) }
 
     /// Leaving the page by any route (another view, ⌘1/⌘2, closing): what was written is organized, the same as
     /// when it loses the cursor. Results land in their days even though the page is gone.
-    static func dismantleNSView(_ view: DocTextView, coordinator: DocCoordinator) {
+    static func dismantleNSView(_ scroll: DocScrollView, coordinator: DocCoordinator) {
         coordinator.organize(includingCurrent: true)
+        if let observer = coordinator.scrollObserver { NotificationCenter.default.removeObserver(observer) }
     }
 
-    /// The page lives inside the 逐日 card: no scroll view of its own, it grows with what's written.
-    func makeNSView(context: Context) -> DocTextView {
+    func makeNSView(context: Context) -> DocScrollView {
+        let scroll = DocScrollView(frame: .zero)
         let view = DocTextView(frame: .zero)
+        scroll.scrolls = scrolls
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = scrolls
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.borderType = .noBorder
+        if scrolls {
+            // Room to write below the last day, as in any document.
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 240, right: 0)
+        }
+        view.minSize = .zero
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        view.autoresizingMask = [.width]
+        // Only what's on screen is laid out (years of history otherwise lay out on every jump and resize).
+        view.layoutManager?.allowsNonContiguousLayout = true
+        scroll.documentView = view
+        scroll.contentView.postsBoundsChangedNotifications = true
         // Every change to the text (typing, drawing, organizing) counts, so a measured height is never stale.
         let coordinator = context.coordinator
         NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: view.textStorage,
@@ -256,10 +281,20 @@ struct DayDocumentView: NSViewRepresentable {
         context.coordinator.autofocused = autofocus
         if autofocus || controller?.textView == nil { controller?.textView = view }
         context.coordinator.build(days, anchor: anchor)
-        return view
+        if scrolls {
+            context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+            ) { [weak coordinator] _ in
+                MainActor.assumeIsolated { coordinator?.scrolled() }
+            }
+        }
+        return scroll
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView view: DocTextView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: DocScrollView, context: Context) -> CGSize? {
+        // The home document fills the window and scrolls itself.
+        if scrolls { return nil }
+        guard let view = scroll.documentView as? DocTextView else { return nil }
         let width = proposal.width ?? 600
         guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
         // Measuring lays out the whole page (years of history): only again when the text or the width changed.
@@ -275,7 +310,8 @@ struct DayDocumentView: NSViewRepresentable {
         return CGSize(width: width, height: height)
     }
 
-    func updateNSView(_ view: DocTextView, context: Context) {
+    func updateNSView(_ scroll: DocScrollView, context: Context) {
+        guard let view = scroll.documentView as? DocTextView else { return }
         context.coordinator.parent = self
         // Asked to take the cursor while already on screen (a day chosen in the rail or the calendar).
         if autofocus && !context.coordinator.autofocused {
@@ -327,6 +363,24 @@ struct DayDocumentView: NSViewRepresentable {
             context.coordinator.scroll(to: day)
             context.coordinator.view?.window?.makeFirstResponder(context.coordinator.view)
         }
+    }
+}
+
+/// The document's scroll view. The text keeps a readable width, centered, however wide the window is.
+final class DocScrollView: NSScrollView {
+    var scrolls = true
+    static let textWidth: CGFloat = 820
+
+    override func tile() {
+        super.tile()
+        guard scrolls, let text = documentView as? NSTextView else { return }
+        let side = max(40, (contentView.bounds.width - Self.textWidth) / 2)
+        if abs(text.textContainerInset.width - side) > 0.5 { text.textContainerInset = NSSize(width: side, height: 22) }
+    }
+
+    // A page sitting in another scroll view leaves the wheel to it.
+    override func scrollWheel(with event: NSEvent) {
+        if scrolls { super.scrollWheel(with: event) } else { nextResponder?.scrollWheel(with: event) }
     }
 }
 
@@ -597,6 +651,20 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     /// Changes to the text so far, and the height last measured for it.
     var edits = 0
     var measured: (width: CGFloat, edits: Int, min: CGFloat, height: CGFloat)?
+    var scrollObserver: NSObjectProtocol?
+    /// The day last reported at the top of the window.
+    private var shownDay: PlanDate?
+
+    /// The window moved: tell the sidebar which day is at its top (only when that day changes).
+    func scrolled() {
+        guard let report = parent.visibleDay, let view, let layout = view.layoutManager, let container = view.textContainer,
+              let clip = view.enclosingScrollView?.contentView, let storage = view.textStorage, storage.length > 0 else { return }
+        let point = NSPoint(x: view.textContainerInset.width + 1, y: clip.bounds.minY - view.textContainerInset.height + 40)
+        let index = min(storage.length - 1, layout.characterIndex(for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil))
+        guard let found = day(at: index), found != shownDay else { return }
+        shownDay = found
+        report(found)
+    }
     /// What the page was last brought up to date with.
     private var reconciled: [DocDay] = []
     /// Days that had a saved page when drawn (emptying one must still be saved).
@@ -1232,25 +1300,35 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             let format = titleFormat(in: paragraph.range)
             synced[id] = "\(paragraph.text)|\(paragraph.depth)|\(parentID(for: index, in: list)?.uuidString ?? "")|\(format.style ?? "")|\(format.struck)|\(day.key)"
         }
+        // Days just drawn are as stored: the next save writes only days edited after (a jump that brings a month of
+        // history onto the page otherwise wrote every one of its days back).
+        let (byDay, pendingByDay) = gatherNotes(list)
+        for day in Set(list.compactMap(\.day)) where savedNotes[day] == nil {
+            savedNotes[day] = (byDay[day]?.copy() as? NSAttributedString, pendingByDay[day] ?? [])
+        }
+    }
+
+    /// Each day's note text and its unorganized lines, gathered in one pass (nil when the page changed under it).
+    private func gatherNotes(_ list: [Paragraph]) -> ([PlanDate: NSMutableAttributedString], [PlanDate: [String]]) {
+        guard let storage = view?.textStorage else { return ([:], [:]) }
+        var byDay: [PlanDate: NSMutableAttributedString] = [:]
+        var pendingByDay: [PlanDate: [String]] = [:]
+        for paragraph in list where !paragraph.isHeading && paragraph.id == nil {
+            guard let day = paragraph.day, NSMaxRange(paragraph.range) <= storage.length else { continue }
+            if !paragraph.isNote && !paragraph.text.isEmpty { pendingByDay[day, default: []].append(Self.stripMarker(paragraph.text)) }
+            guard !paragraph.text.isEmpty || containsAttachment(paragraph.range) else { continue }
+            let text = byDay[day] ?? NSMutableAttributedString()
+            text.append(storage.attributedSubstring(from: paragraph.range))
+            byDay[day] = text
+        }
+        return (byDay, pendingByDay)
     }
 
     private func saveNotes(_ list: [Paragraph]) {
         guard let storage = view?.textStorage else { return }
-        var byDay: [PlanDate: NSMutableAttributedString] = [:]
-        for paragraph in list where !paragraph.isHeading && paragraph.id == nil && paragraph.day != nil {
-            guard NSMaxRange(paragraph.range) <= storage.length else { return }
-            guard !paragraph.text.isEmpty || containsAttachment(paragraph.range) else { continue }
-            let piece = storage.attributedSubstring(from: paragraph.range)
-            // NSMutableAttributedString is a class: store the instance, don't mutate a temporary default.
-            let text = byDay[paragraph.day!] ?? NSMutableAttributedString()
-            text.append(piece)
-            byDay[paragraph.day!] = text
-        }
-        // Each day's unorganized lines, gathered in one pass (years of history are thousands of days).
-        var pendingByDay: [PlanDate: [String]] = [:]
-        for paragraph in list where !paragraph.isHeading && paragraph.id == nil && !paragraph.isNote && !paragraph.text.isEmpty {
-            if let day = paragraph.day { pendingByDay[day, default: []].append(Self.stripMarker(paragraph.text)) }
-        }
+        // A list read before the page changed under it: leave this save to the next one.
+        if list.contains(where: { NSMaxRange($0.range) > storage.length }) { return }
+        let (byDay, pendingByDay) = gatherNotes(list)
         for day in Set(list.compactMap(\.day)) {
             let text = byDay[day]
             let pendingNow = pendingByDay[day] ?? []

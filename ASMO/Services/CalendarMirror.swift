@@ -34,6 +34,8 @@ final class CalendarMirror {
 
     func start(_ container: ModelContainer) {
         guard context == nil else { return }
+        // The test store (a copy of real data) stays out of the real Calendar unless asked for.
+        if test && ProcessInfo.processInfo.environment["ASMO_TEST_MIRROR"] == nil { return }
         context = container.mainContext
         observers.append(NotificationCenter.default.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { CalendarMirror.shared.schedule(after: 4) }
@@ -205,12 +207,22 @@ final class CalendarMirror {
         }
         let made = EKCalendar(for: type, eventStore: store)
         made.title = name
-        let iCloud = store.sources.first { $0.sourceType == .calDAV && $0.title.compare("iCloud", options: .caseInsensitive) == .orderedSame }
+        // An account that already holds this kind of list (an iCloud account may hold calendars but not reminders,
+        // or the other way round), iCloud first, then wherever new items go by default.
         let fallback = type == .event ? store.defaultCalendarForNewEvents?.source : store.defaultCalendarForNewReminders()?.source
-        guard let source = iCloud ?? fallback else { throw Problem(message: "No account for a \(type == .event ? "calendar" : "reminders list").") }
-        made.source = source
+        let able = store.sources.filter { !$0.calendars(for: type).isEmpty }
+        let iCloud = able.first { $0.sourceType == .calDAV && $0.title.compare("iCloud", options: .caseInsensitive) == .orderedSame }
+        var candidates = [iCloud, fallback].compactMap { $0 } + able
+        var seen = Set<String>()
+        candidates = candidates.filter { seen.insert($0.sourceIdentifier).inserted }
+        var lastError: Error = Problem(message: "No account for a \(type == .event ? "calendar" : "reminders list").")
         made.cgColor = NSColor(srgbRed: 0.55, green: 0.42, blue: 0.95, alpha: 1).cgColor
-        try store.saveCalendar(made, commit: true)
+        var saved = false
+        for source in candidates {
+            made.source = source
+            do { try store.saveCalendar(made, commit: true); saved = true; break } catch { lastError = error }
+        }
+        guard saved else { throw lastError }
         UserDefaults.standard.set(made.calendarIdentifier, forKey: key)
         return made
     }

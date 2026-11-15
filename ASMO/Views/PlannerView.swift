@@ -114,7 +114,9 @@ struct PlannerView: View {
     @Query(sort: \JournalArchiveEdit.updatedAt, order: .reverse) private var journalEdits: [JournalArchiveEdit]
     @Query(sort: \RoutineRecord.order) private var routines: [RoutineRecord]
     @Query private var routineMarks: [RoutineMark]
-    @Query private var dayPages: [DayPage]
+    /// Day pages are read by day (or just their days), never all at once: a query over every page refetched
+    /// 1,600 pages of history on each redraw. `pagesVersion` redraws when any save changes them.
+    @State private var pagesVersion = 0
     @StateObject private var pageController = PageController()
 
     #if !os(macOS)
@@ -363,6 +365,12 @@ struct PlannerView: View {
             Task { await refresh() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .asmoToday)) { _ in showToday() }
+        // A save that touched day pages (here, or by an agent through the bridge): draw them again.
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: RunLoop.main)) { note in
+            let touched = [ModelContext.NotificationKey.insertedIdentifiers, .updatedIdentifiers, .deletedIdentifiers]
+                .compactMap { note.userInfo?[$0.rawValue] as? [PersistentIdentifier] }.joined()
+            if touched.contains(where: { $0.entityName == "DayPage" }) { pagesVersion &+= 1 }
+        }
         .onReceive(voiceKeyEvents, perform: handleVoiceKey)
         #if os(iOS) && DEBUG
         .task { await PhoneDebugHooks.watch() }
@@ -831,7 +839,7 @@ struct PlannerView: View {
         guard stored.changed else { return }
         savePage(stored.data, day: day)
         let lines = text.components(separatedBy: "\n").map(\.trimmed).filter { !$0.isEmpty && !before.contains($0) }
-        if !lines.isEmpty, let page = dayPages.first(where: { $0.dayKey == day.key }) {
+        if !lines.isEmpty, let page = dayPage(day.key) {
             page.pendingRaw = lines.joined(separator: "\n")
             persist()
         }
@@ -874,6 +882,25 @@ struct PlannerView: View {
                 view.insertText(String(character), replacementRange: view.selectedRange())
             }
         case "key": view.doCommand(by: Selector(rest))
+        case "scrolltest":
+            // "scrolltest:N": scroll N steps of 60 pt, drawing each, and write the slowest and average frame.
+            guard let clip = view.enclosingScrollView?.contentView else { return }
+            var times: [Double] = []
+            let steps = Int(rest) ?? 200
+            for step in 0..<steps {
+                let started = Date.now
+                let y = step < steps / 2 ? clip.bounds.minY + 60 : max(0, clip.bounds.minY - 60)
+                clip.scroll(to: NSPoint(x: 0, y: y))
+                view.enclosingScrollView?.reflectScrolledClipView(clip)
+                view.window?.displayIfNeeded()
+                times.append(Date.now.timeIntervalSince(started) * 1000)
+            }
+            let report = String(format: "frames %d avg %.2f ms max %.2f ms >16ms %d", times.count,
+                                times.reduce(0, +) / Double(max(1, times.count)), times.max() ?? 0, times.filter { $0 > 16 }.count)
+            try? report.write(to: out, atomically: true, encoding: .utf8)
+            return
+        case "month":
+            if let day = JournalDays.date(forKey: rest + "-01") { jump(toMonth: day) }
         case "barclick":
             // "barclick:N": a click on the Nth button (from 0) of the bar next to the selection, sent to this
             // window only (the real mouse isn't touched).
@@ -1013,9 +1040,7 @@ struct PlannerView: View {
         for task in tasks where !task.calendarLinked {
             if let day = task.schedule?.dayOnly { days.insert(day) }
         }
-        for page in dayPages {
-            if let day = JournalDays.date(forKey: page.dayKey) { days.insert(day) }
-        }
+        days.formUnion(pageDays())
         for note in notes where !note.body.trimmed.isEmpty {
             if let day = JournalDays.date(forKey: note.dayKey) { days.insert(day) }
         }
@@ -1036,33 +1061,73 @@ struct PlannerView: View {
         let shown = days.filter { $0.day == nil || $0 >= cutoff }
         var result = Set(shown)
         if let paperFocus {
-            // A day jumped to, with the written days around it (the history there reads in context).
+            // A day jumped to, with the written days around it and the rest of its month (the history there reads
+            // in context, and a month chosen in the sidebar is there whole).
             result.insert(paperFocus)
-            if let low = clock.calendar.date(byAdding: .day, value: -10, to: paperFocus.date(in: clock.calendar) ?? .now),
-               let high = clock.calendar.date(byAdding: .day, value: 10, to: paperFocus.date(in: clock.calendar) ?? .now) {
+            let focusDate = paperFocus.date(in: clock.calendar) ?? .now
+            let monthEnd = clock.calendar.dateInterval(of: .month, for: focusDate)?.end ?? focusDate
+            if let low = clock.calendar.date(byAdding: .day, value: -10, to: focusDate),
+               let high = clock.calendar.date(byAdding: .day, value: 10, to: max(focusDate, monthEnd.addingTimeInterval(-1))) {
                 let lo = PlanDate.from(low, calendar: clock.calendar), hi = PlanDate.from(high, calendar: clock.calendar)
                 result.formUnion(days.filter { $0.day != nil && $0 >= lo && $0 <= hi })
             }
         }
-        paperOlder = days.count - shown.count
+        // Every month with something written, for the contents sidebar.
+        var months: [Int: PlanDate] = [:]
+        for day in days where day.day != nil {
+            let key = day.year * 100 + day.month
+            if let first = months[key], first <= day { continue }
+            months[key] = day
+        }
+        let list = months.keys.sorted().compactMap { months[$0] }
+        if list != paperContentsModel.months {
+            let model = paperContentsModel
+            DispatchQueue.main.async { model.months = list }
+        }
         return result.sorted()
     }
 
-    /// Past days on the paper (more with each 更早的记录).
-    @State private var paperHistory = 60
-    /// How many earlier days with something on them aren't on the paper (written while computing paperDays).
-    private final class Count { var value = 0 }
-    @State private var paperOlderBox = Count()
-    private var paperOlder: Int {
-        get { paperOlderBox.value }
-        nonmutating set { paperOlderBox.value = newValue }
+    /// Past days on the paper (earlier months are reached from the contents sidebar).
+    private let paperHistory = 60
+    /// The sidebar's months and the month on screen: observed by the sidebar only, so scrolling past a month
+    /// never redraws the planner.
+    @State private var paperContentsModel = PaperContentsModel()
+    /// Every day that has a page, read again only after a save (`pagesVersion`).
+    private final class PageDays { var version = -1; var days = Set<PlanDate>() }
+    @State private var pageDaysBox = PageDays()
+
+    private func pageDays() -> Set<PlanDate> {
+        if pageDaysBox.version != pagesVersion {
+            var descriptor = FetchDescriptor<DayPage>()
+            descriptor.propertiesToFetch = [\.dayKey]
+            let pages = (try? context.fetch(descriptor)) ?? []
+            pageDaysBox.days = Set(pages.compactMap { JournalDays.date(forKey: $0.dayKey) })
+            pageDaysBox.version = pagesVersion
+        }
+        return pageDaysBox.days
     }
+
+    /// The page of one day (including one made but not saved yet).
+    private func dayPage(_ key: String) -> DayPage? {
+        var descriptor = FetchDescriptor<DayPage>(predicate: #Predicate { $0.dayKey == key })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+    @AppStorage("paperContents") private var paperContents = true
 
     /// The logo and 文档 | 日历: the same place in both views.
     private var homeLeading: some View {
         HStack(spacing: 10) {
             Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
                 .accessibilityHidden(true)
+            if !paperContents {
+                Button { paperContents = true } label: {
+                    Image(systemName: "sidebar.left").font(.system(size: 13, weight: .medium)).foregroundStyle(theme.quiet)
+                        .frame(width: 30, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(DesktopButtonStyle(theme: theme))
+                .help("显示目录")
+            }
             jumpButton
         }
     }
@@ -1171,28 +1236,34 @@ struct PlannerView: View {
                 if documentOrganizing { ProgressView().progressViewStyle(.linear).tint(theme.accent).frame(height: 2) }
             }
             .frame(height: 2)
-            ScrollView {
-                let days = documentDays(paperDays)
-                if paperOlder > 0 {
-                    Button {
-                        paperHistory += 120
-                    } label: {
-                        Label(String(localized: "更早的记录 · 还有 \(paperOlder) 天"), systemImage: "chevron.up")
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(theme.quiet)
-                            .padding(.horizontal, 12).frame(height: 28).contentShape(Rectangle())
-                    }
-                    .buttonStyle(DesktopButtonStyle(theme: theme))
-                    .help("把再往前四个月的记录（包括导入的石墨历史）放到文档里")
-                    .padding(.top, 14)
+            let days = documentDays(paperDays)
+            HStack(spacing: 0) {
+                if paperContents {
+                    paperSidebar
+                    Rectangle().fill(theme.line.opacity(0.6)).frame(width: 1)
                 }
                 DayDocumentView(days: days, anchor: paperFocus ?? clock.today, jump: paperJump, theme: theme,
                                 actions: documentActions, controller: pageController, organizeRequest: organizeTick,
-                                rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false)
-                    .frame(maxWidth: 820)
-                    .padding(.horizontal, 40).padding(.top, 18).padding(.bottom, 240)
-                    .frame(maxWidth: .infinity)
+                                rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false,
+                                scrolls: true, visibleDay: { [paperContentsModel] day in
+                                    let month = PlanDate(year: day.year, month: day.month)
+                                    if paperContentsModel.visible != month { paperContentsModel.visible = month }
+                                })
             }
         }
+    }
+
+    private var paperSidebar: some View {
+        PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
+                             today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
+                             pick: { jump(toMonth: $0) }, close: { paperContents = false })
+    }
+
+    /// A month from the contents: its first written day at the top of the window.
+    private func jump(toMonth first: PlanDate) {
+        let today = clock.today
+        if first.year == today.year && first.month == today.month { jump(to: today); return }
+        jump(to: first)
     }
 
     private func dayEditor(_ day: PlanDate) -> some View {
@@ -1935,11 +2006,11 @@ struct PlannerView: View {
     }
 
     private func pageData(_ day: PlanDate) -> Data? {
-        dayPages.first { $0.dayKey == day.key }?.rtfd
+        dayPage(day.key)?.rtfd
     }
 
     private func savePage(_ data: Data?, day: PlanDate) {
-        let existing = dayPages.first { $0.dayKey == day.key }
+        let existing = dayPage(day.key)
         if let data {
             if let existing { existing.rtfd = data; existing.updatedAt = .now }
             else { context.insert(DayPage(dayKey: day.key, rtfd: data)) }
@@ -2689,7 +2760,7 @@ struct PlannerView: View {
     private func organizeStoredPage(_ day: PlanDate) async {
         // An organize started inside the page is still running: it files its own results when it returns.
         guard !documentOrganizing, openPageDay != day,
-              let page = dayPages.first(where: { $0.dayKey == day.key }), let raw = page.pendingRaw,
+              let page = dayPage(day.key), let raw = page.pendingRaw,
               documentDay != day else { return }
         // Quotes, headings-in-text and bare links stay as written, the same as on the open page.
         let lines = raw.components(separatedBy: "\n").filter { !$0.trimmed.isEmpty && !NoteRule.looksLikeNote($0, heading: false) }
@@ -2703,7 +2774,7 @@ struct PlannerView: View {
     /// Files organized lines of a page that is no longer open: items go to their days, the lines leave the page.
     @discardableResult
     private func fileJudgements(lines: [String], judgements: [LineJudgement], day: PlanDate) -> String? {
-        if let page = dayPages.first(where: { $0.dayKey == day.key }), page.pendingRaw != nil {
+        if let page = dayPage(day.key), page.pendingRaw != nil {
             page.pendingRaw = nil
             persist()
         }
@@ -2821,7 +2892,7 @@ struct PlannerView: View {
         var since = PlanDate(year: 1, month: 1, day: 1)
     }
 
-    private func docIndex() -> DocIndex {
+    private func docIndex(_ days: [PlanDate]? = nil) -> DocIndex {
         var index = DocIndex()
         for task in tasks where !task.calendarLinked {
             if let day = task.schedule?.dayOnly { index.tasks[day, default: []].append(task) }
@@ -2832,7 +2903,15 @@ struct PlannerView: View {
         }
         index.marks = Dictionary(routineMarks.map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
         index.notes = Dictionary(notes.filter { !$0.body.trimmed.isEmpty }.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
-        index.pages = Dictionary(dayPages.compactMap { page in page.rtfd.map { (page.dayKey, $0) } }, uniquingKeysWith: { first, _ in first })
+        // Only the pages of the days being drawn.
+        let keys = (days ?? []).map(\.key)
+        let pages: [DayPage]
+        if days == nil {
+            pages = (try? context.fetch(FetchDescriptor<DayPage>())) ?? []
+        } else {
+            pages = (try? context.fetch(FetchDescriptor<DayPage>(predicate: #Predicate { keys.contains($0.dayKey) }))) ?? []
+        }
+        index.pages = Dictionary(pages.compactMap { page in page.rtfd.map { (page.dayKey, $0) } }, uniquingKeysWith: { first, _ in first })
         for reminder in system.reminders where reminder.asmoID == nil {
             if let day = reminder.schedule?.dayOnly { index.reminders[day, default: []].append(reminder) }
         }
@@ -2847,11 +2926,11 @@ struct PlannerView: View {
         let started = Date.now
         defer { PerfLog.note("documentDays", since: started) }
         #endif
-        let index = docIndex()
+        let index = docIndex(days)
         return days.map { documentDay($0, index: index) }
     }
 
-    private func documentDay(_ day: PlanDate) -> DocDay { documentDay(day, index: docIndex()) }
+    private func documentDay(_ day: PlanDate) -> DocDay { documentDay(day, index: docIndex([day])) }
 
     private func documentDay(_ day: PlanDate, index: DocIndex) -> DocDay {
         let today = clock.today
@@ -3000,7 +3079,7 @@ struct PlannerView: View {
             saveNotes: { day, data, pending in
                 if pageData(day) != data { savePage(data, day: day) }
                 let raw = pending.isEmpty ? nil : pending.joined(separator: "\n")
-                if let page = dayPages.first(where: { $0.dayKey == day.key }), page.pendingRaw != raw {
+                if let page = dayPage(day.key), page.pendingRaw != raw {
                     page.pendingRaw = raw
                     persist()
                 }
@@ -3299,7 +3378,7 @@ struct PlannerView: View {
             for record in routineMarks where record.routineID == mark.routine && record.dayKey == mark.day { context.delete(record) }
         }
         savePage(batch.page, day: batch.day)
-        if let page = dayPages.first(where: { $0.dayKey == batch.day.key }) { page.pendingRaw = nil }
+        if let page = dayPage(batch.day.key) { page.pendingRaw = nil }
         persist()
         if OrganizeBatch.last === batch { OrganizeBatch.last = nil }
         if editingDay == batch.day || documentDay == batch.day { pageRebuild += 1 }
@@ -4444,7 +4523,7 @@ struct PlannerView: View {
     private func writeHistoryPages(_ days: [PlanDate: [ArchivedDayEntry]]) {
         let promoted = Set(tasks.compactMap(\.importKey))
         let edits = Dictionary(journalEdits.map { ($0.recordKey, $0.body) }, uniquingKeysWith: { newest, _ in newest })
-        var pages = Dictionary(dayPages.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
+        var pages = Dictionary(((try? context.fetch(FetchDescriptor<DayPage>())) ?? []).map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
         let titles = Dictionary(grouping: tasks.filter { $0.schedule?.dayOnly.day != nil }) { $0.schedule!.dayOnly }
         let font = NSFont.systemFont(ofSize: 15)
         for (day, entries) in days {
@@ -4967,3 +5046,69 @@ struct CalendarHost<Content: View>: View, Equatable {
     var body: some View { content() }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
 }
+
+#if os(macOS)
+final class PaperContentsModel: ObservableObject {
+    /// The first written day of every month that has one, oldest first.
+    @Published var months: [PlanDate] = []
+    /// The month at the top of the document's window.
+    @Published var visible: PlanDate?
+}
+
+/// Contents: every month with something written, oldest first like the document; the month on screen is
+/// highlighted and kept in view, and a click goes there.
+struct PaperContentsSidebar: View {
+    @ObservedObject var model: PaperContentsModel
+    let theme: PlannerTheme
+    let thisYear: Int
+    let today: PlanDate
+    let reduceMotion: Bool
+    let pick: (PlanDate) -> Void
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("目录").font(.system(size: 12, weight: .semibold)).foregroundStyle(theme.quiet)
+                Spacer()
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(theme.quiet)
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help("收起目录")
+            }
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 6)
+            ScrollViewReader { reader in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.months, id: \.self) { first in
+                            let month = PlanDate(year: first.year, month: first.month)
+                            let current = (model.visible ?? today) == month
+                            Button { pick(first) } label: {
+                                Text(first.year == thisYear ? "\(first.month)月" : "\(first.year % 100)年\(first.month)月")
+                                    .font(.system(size: 13, weight: current ? .semibold : .regular))
+                                    .foregroundStyle(current ? theme.accent : theme.ink.opacity(0.62))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16).frame(height: 30).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .id(month)
+                        }
+                    }
+                    .padding(.bottom, 20)
+                }
+                .scrollIndicators(.never)
+                .onChange(of: model.visible) { _, month in
+                    guard let month else { return }
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { reader.scrollTo(month, anchor: .center) }
+                }
+                .onChange(of: model.months) { _, _ in
+                    reader.scrollTo(model.visible ?? today, anchor: .center)
+                }
+                .onAppear { reader.scrollTo(model.visible ?? today, anchor: .center) }
+            }
+        }
+        .frame(width: 150)
+    }
+}
+#endif

@@ -18,13 +18,26 @@ enum JournalDays {
         }.filter { (1...9999).contains($0.year) }
     }
 
-    /// "2026-11-14" → that day; "2027-01" → the month (a plan for sometime that month).
+    /// "2026-11-14" → that day; "2027-01" → the month (a plan for sometime that month). Read by hand, not by
+    /// pattern: it runs for every page on every redraw.
     static func date(forKey key: String) -> PlanDate? {
-        if let parts = key.match(#"^(\d{4})-(\d{2})$"#), let year = Int(parts[1]), let month = Int(parts[2]), (1...12).contains(month) {
+        let bytes = Array(key.utf8)
+        guard bytes.count == 7 || bytes.count == 10 else { return nil }
+        func number(_ range: Range<Int>) -> Int? {
+            var value = 0
+            for index in range {
+                let byte = bytes[index]
+                guard byte >= 48, byte <= 57 else { return nil }
+                value = value * 10 + Int(byte - 48)
+            }
+            return value
+        }
+        guard bytes[4] == 45, let year = number(0..<4), let month = number(5..<7) else { return nil }
+        if bytes.count == 7 {
+            guard (1...12).contains(month) else { return nil }
             return PlanDate(year: year, month: month, day: nil)
         }
-        guard let parts = key.match(#"^(\d{4})-(\d{2})-(\d{2})$"#),
-              let year = Int(parts[1]), let month = Int(parts[2]), let day = Int(parts[3]) else { return nil }
+        guard bytes[7] == 45, let day = number(8..<10) else { return nil }
         return PlanDate(year: year, month: month, day: day)
     }
 }

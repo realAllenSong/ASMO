@@ -57,4 +57,14 @@ extension JournalDaysTests {
         #expect(summerConverted.key == "2026-07-11")
         #expect(summerConverted.hour == 21)
     }
+
+    @Test func dayKeysReadBack() {
+        #expect(JournalDays.date(forKey: "2026-11-14") == PlanDate(year: 2026, month: 11, day: 14))
+        #expect(JournalDays.date(forKey: "2027-01") == PlanDate(year: 2027, month: 1, day: nil))
+        #expect(JournalDays.date(forKey: "2027-13") == nil)
+        #expect(JournalDays.date(forKey: "2026-1-14") == nil)
+        #expect(JournalDays.date(forKey: "2026/11/14") == nil)
+        #expect(JournalDays.date(forKey: "") == nil)
+        #expect(JournalDays.date(forKey: "２０２６-11-14") == nil)
+    }
 }
