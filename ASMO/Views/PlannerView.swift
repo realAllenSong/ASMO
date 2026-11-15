@@ -3128,6 +3128,7 @@ struct PlannerView: View {
     /// Words like 明天 on a page mean "the day after this page", so a page reads dates from its own day.
     private func pageClock(_ day: PlanDate) -> CaptureClock {
         var copy = clock
+        copy.actualNow = clock.now
         let calendar = clock.calendar
         let time = calendar.dateComponents([.hour, .minute, .second], from: clock.now)
         if let start = day.dayOnly.date(in: calendar),

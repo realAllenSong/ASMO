@@ -288,15 +288,27 @@ enum CaptureParser {
             if date?.day == nil || !time.isValid { return (nil, rest, nil) }
             date?.hour = time.hour
             date?.minute = time.minute
+            // Today, a time that doesn't say morning or evening and whose morning has already gone by is this
+            // evening's: "9点半" written at 7 pm is 21:30.
+            if !time.marked, (1...11).contains(time.hour), date?.dayOnly == clock.actualToday,
+               time.hour * 60 + time.minute < clock.actualMinuteOfDay {
+                date?.hour = time.hour + 12
+            }
         } else if !hasDayOrMonth {
             return nil
         }
         if let connector = rest.match(#"^\s*(?:(?:到|至)(?=\s*(?:[上下中晚早凌一二两三四五六七八九十\d]))|[-–—~～])\s*"#)?.first,
            let start = date?.hour {
             let tail = String(rest.dropFirst(connector.count))
-            guard let end = timePrefix(tail), end.isValid else { return (nil, rest, nil) }
+            // "9:30-10": a bare hour ends the range too.
+            let bare = tail.match(#"^(\d{1,2})(?![\d:：点時时.])"#).flatMap { parts in
+                Int(parts[1]).map { (length: parts[0].count, hour: $0, minute: 0, isValid: (0...24).contains($0), marked: $0 >= 12) }
+            }
+            guard let end = timePrefix(tail) ?? bare, end.isValid else { return (nil, rest, nil) }
             var endHour = end.hour
-            if start >= 12, endHour < 12, tail.match(#"^[一二两三四五六七八九十零〇\d]+[点時时]"#) != nil {
+            // The end is in the same half of the day as the start unless it says otherwise ("下午3点到5点",
+            // "晚上9:30-10").
+            if start >= 12, endHour < 12, !end.marked || tail.match(#"^[一二两三四五六七八九十零〇\d]+[点時时]"#) != nil {
                 endHour += 12
             }
             let startMinute = start * 60 + (date?.minute ?? 0)
@@ -311,14 +323,16 @@ enum CaptureParser {
         return (date, rest, date == nil ? nil : endMinute)
     }
 
-    private static func timePrefix(_ text: String) -> (length: Int, hour: Int, minute: Int, isValid: Bool)? {
+    /// A time at the start of `text`. `marked`: it says which half of the day (上午/下午…, am/pm, or a 24-hour
+    /// clock like 21:30 or 09:30); unmarked, 9:30 could be morning or evening.
+    private static func timePrefix(_ text: String) -> (length: Int, hour: Int, minute: Int, isValid: Bool, marked: Bool)? {
         // Dictation writes "下午3:00" / "晚上10:30": a part of day followed by clock digits.
         if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)\s*(\d{1,2})[:：](\d{2})(?!\d)"#),
            var hour = Int(parts[2]), let minute = Int(parts[3]) {
             let valid = (1...12).contains(hour) && (0...59).contains(minute)
             if ["中午", "下午", "傍晚", "晚上"].contains(parts[1]), hour < 12, parts[1] != "中午" || hour < 3 { hour += 12 }
             if parts[1] == "凌晨", hour == 12 { hour = 0 }
-            return (parts[0].count, hour, minute, valid)
+            return (parts[0].count, hour, minute, valid, true)
         }
         if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)?\s*(?:是|在)?\s*([一二两三四五六七八九十零〇\d]+)[点時时](?:(半|一刻|三刻)|([一二两三四五六七八九十零〇\d]+)分?)?"#),
            var hour = number(parts[2]) {
@@ -327,16 +341,16 @@ enum CaptureParser {
                parts[1] != "中午" || hour < 3 { hour += 12 }
             if parts[1] == "凌晨", hour == 12 { hour = 0 }
             let minute = ["半": 30, "一刻": 15, "三刻": 45][parts[3]] ?? number(parts[4]) ?? 0
-            return (parts[0].count, hour, minute, valid)
+            return (parts[0].count, hour, minute, valid, !parts[1].isEmpty || hour >= 12)
         }
         if let parts = text.match(#"^(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b"#),
            let hour = Int(parts[1]) {
             return (parts[0].count, hour % 12 + (parts[3].lowercased() == "pm" ? 12 : 0),
-                    Int(parts[2]) ?? 0, (1...12).contains(hour))
+                    Int(parts[2]) ?? 0, (1...12).contains(hour), true)
         }
         if let parts = text.match(#"^(?:at\s+)?(\d{1,2}):(\d{2})(?!\d)"#),
            let hour = Int(parts[1]), let minute = Int(parts[2]) {
-            return (parts[0].count, hour, minute, true)
+            return (parts[0].count, hour, minute, true, hour >= 12 || parts[1].hasPrefix("0"))
         }
         return nil
     }

@@ -64,6 +64,16 @@ struct CaptureClock: Sendable {
     }()
 
     var today: PlanDate { PlanDate.from(now, calendar: calendar) }
+    /// The real moment of writing, when `now` was moved to the day of the page being written (relative words
+    /// like 明天 count from that page's day, but "has this time already passed" is about the real clock).
+    var actualNow: Date?
+    /// The real day.
+    var actualToday: PlanDate { PlanDate.from(actualNow ?? now, calendar: calendar) }
+    /// Minutes since midnight, by the real clock.
+    var actualMinuteOfDay: Int {
+        let parts = calendar.dateComponents([.hour, .minute], from: actualNow ?? now)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
 
     func offset(days: Int) -> PlanDate? {
         calendar.date(byAdding: .day, value: days, to: now).map { PlanDate.from($0, calendar: calendar) }
