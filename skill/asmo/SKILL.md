@@ -86,6 +86,18 @@ asmo attach ~/Desktop/photo.jpg --day today --caption "whiteboard"
 - Block ids are positions: read the page right before `set` / `rm`.
 - A picture already on the page reads back as `![…](asmo-image:N)`; keep that text to keep the picture.
 
+Many days at once (a journal or an old planner being brought in): list what exists, then import in one go.
+
+```bash
+asmo pages 2021-01-01 2026-10-31        # which days have a page: day, length, first line
+asmo page import --file pages.json      # {"YYYY-MM-DD": "Markdown", …}; only days with no page yet
+asmo page import --replace --file pages.json   # rewrite those days (--append adds below instead)
+```
+
+- One save and one `asmo undo` for the whole import; check `asmo pages` before replacing anything.
+- Plain text from elsewhere: escape Markdown characters (`\*`, `\_`, `\|`, `\#`, a leading `-` or `1.`) so it reads
+  literally, and separate lines with a blank line.
+
 ## Important dates
 
 ```bash

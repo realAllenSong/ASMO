@@ -7,3 +7,4 @@ Config/Personal.xcconfig
 dist/
 .vscode/
 .codex/
+local.md

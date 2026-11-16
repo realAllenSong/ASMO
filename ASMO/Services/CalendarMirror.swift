@@ -92,7 +92,8 @@ final class CalendarMirror {
         let cal = clock.calendar
         let today = clock.today
         guard let todayDate = today.date(in: cal),
-              let from = cal.date(byAdding: .day, value: -30, to: cal.startOfDay(for: todayDate)),
+              // From today on: what's past stays where it is (nothing to keep in step there).
+              let from = Optional(cal.startOfDay(for: todayDate)),
               let until = cal.date(byAdding: .day, value: 400, to: cal.startOfDay(for: todayDate)) else {
             throw Problem(message: "Couldn't work out the dates.")
         }
@@ -140,7 +141,8 @@ final class CalendarMirror {
 
         var records = loadRecords()
         let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records)
-        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0]
+        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0]
+        var deletedAny = false
         var pulledAny = false
         for action in actions {
             switch action {
@@ -171,14 +173,33 @@ final class CalendarMirror {
             case .release(let id):
                 records[id]?.released = true
                 counts["released", default: 0] += 1
+            case .deleteHere(let id, let identifier):
+                // Only if it's really gone (not moved to another calendar or list, or far out of the window).
+                if store.calendarItem(withIdentifier: identifier) != nil {
+                    records[id]?.released = true
+                    counts["released", default: 0] += 1
+                    continue
+                }
+                guard let task = byID[id] else { continue }
+                for child in children[id] ?? [] { context.delete(child) }
+                context.delete(task)
+                records[id] = nil
+                deletedAny = true
+                counts["deleted", default: 0] += 1
             }
         }
         for extra in extras { try remove(extra) }
-        if actions.contains(where: { if case .pull = $0 { return false }; if case .release = $0 { return false }; return true }) || !extras.isEmpty {
+        let wroteThere = actions.contains { action in
+            switch action {
+            case .create, .update, .remove: return true
+            case .pull, .release, .deleteHere: return false
+            }
+        }
+        if wroteThere || !extras.isEmpty {
             quietUntil = .now.addingTimeInterval(3)
             try store.commit()
         }
-        if pulledAny { try context.save() }
+        if pulledAny || deletedAny { try context.save() }
         saveRecords(records)
         return ["state": "ok", "calendar": calendar.title, "list": list.title, "items": wanted.count,
                 "events": wanted.values.filter { $0.kind == .event }.count,

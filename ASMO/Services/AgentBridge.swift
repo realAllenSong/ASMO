@@ -125,7 +125,9 @@ final class AgentCommands {
                 if undos.count > 100 { undos.removeFirst() }
             }
             // An open page shows what was just written.
-            for key in changedPages { NotificationCenter.default.post(name: .asmoPageChanged, object: key) }
+            // (Many at once: one redraw.)
+            if changedPages.count > 20 { NotificationCenter.default.post(name: .asmoPageChanged, object: nil) }
+            else { for key in changedPages { NotificationCenter.default.post(name: .asmoPageChanged, object: key) } }
             answer["ok"] = true
         } catch {
             context.rollback()
@@ -168,6 +170,8 @@ final class AgentCommands {
         case "page-write": return try await writePage(body)
         case "page-set": return try await setBlock(body)
         case "page-remove": return try removeBlocks(body)
+        case "pages": return try listPages(body)
+        case "page-import": return try await importPages(body)
         case "mirror":
             // Keep Apple Calendar and Reminders in step now, and say what that did.
             if let on = body["on"] as? Bool { UserDefaults.standard.set(on, forKey: CalendarMirror.enabledKey) }
@@ -513,6 +517,68 @@ final class AgentCommands {
         text.replaceCharacters(in: target.range, with: replacement)
         try store(text, key: key, what: "changed a part of the page of \(key)")
         return ["day": key, "blocks": blockRows(text)]
+    }
+
+    /// The days in a range that have a page, each with its length and first line (to see what's written where
+    /// without reading every page).
+    private func listPages(_ body: [String: Any]) throws -> [String: Any] {
+        let from = try body["from"].map(planDay)?.key ?? "0000-00-00"
+        let to = try body["to"].map(planDay)?.key ?? "9999-99-99"
+        let pages = try context.fetch(FetchDescriptor<DayPage>(predicate: #Predicate { $0.dayKey >= from && $0.dayKey <= to },
+                                                               sortBy: [SortDescriptor(\.dayKey)]))
+        let rows: [[String: Any]] = pages.compactMap { page in
+            guard let data = page.rtfd, let text = NSAttributedString(rtfd: data, documentAttributes: nil)?.string else { return nil }
+            let first = text.split(separator: "\n").first.map { String($0.prefix(60)) } ?? ""
+            return ["day": page.dayKey, "chars": text.count, "first": first]
+        }
+        return ["count": rows.count, "pages": rows]
+    }
+
+    /// Many days' pages in one go (an imported journal): {"YYYY-MM-DD": Markdown, …}. "replace" rewrites each
+    /// page, "append" adds below what's there, "missing" writes only days that have no page yet. One change for
+    /// `undo`, one save.
+    private func importPages(_ body: [String: Any]) async throws -> [String: Any] {
+        guard let pages = body["pages"] as? [String: String], !pages.isEmpty else {
+            throw Failure(message: "\"pages\" is an object of day → Markdown.")
+        }
+        let mode = body["mode"] as? String ?? "missing"
+        guard ["replace", "append", "missing"].contains(mode) else { throw Failure(message: "mode is replace, append or missing.") }
+        var befores: [(String, Data?)] = []
+        var written = 0, skipped = 0
+        for (raw, markdown) in pages.sorted(by: { $0.key < $1.key }) {
+            let day = try planDay(raw)
+            guard day.day != nil else { throw Failure(message: "\(raw): a page belongs to a full date (YYYY-MM-DD).") }
+            let record = try pageRecord(day.key)
+            let saved = record?.rtfd.flatMap { NSAttributedString(rtfd: $0, documentAttributes: nil) }
+            if mode == "missing", let saved, !saved.string.trimmed.isEmpty { skipped += 1; continue }
+            NotificationCenter.default.post(name: .asmoPageWillChange, object: day.key)
+            let text = NSMutableAttributedString(attributedString: mode == "append" ? (saved ?? NSAttributedString()) : NSAttributedString())
+            let addition = try await rendered(["markdown": markdown], on: text)
+            if text.length > 0, !text.string.hasSuffix("\n") { text.append(NSAttributedString(string: "\n", attributes: PageMarkdown.body)) }
+            text.append(addition)
+            befores.append((day.key, record?.rtfd))
+            let data = text.string.trimmed.isEmpty ? nil : try text.data(from: NSRange(location: 0, length: text.length),
+                                                                          documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd])
+            try putPage(data, key: day.key)
+            written += 1
+        }
+        let restore = befores
+        remember("imported \(written) page\(written == 1 ? "" : "s")") { [self] in
+            for (key, data) in restore { try putPage(data, key: key) }
+            try context.save()
+            NotificationCenter.default.post(name: .asmoPageChanged, object: nil)
+        }
+        return ["written": written, "skipped": skipped]
+    }
+
+    private func putPage(_ data: Data?, key: String) throws {
+        let record = try pageRecord(key)
+        if let data {
+            if let record { record.rtfd = data; record.updatedAt = .now } else { context.insert(DayPage(dayKey: key, rtfd: data)) }
+        } else if let record {
+            context.delete(record)
+        }
+        changedPages.append(key)
     }
 
     private func removeBlocks(_ body: [String: Any]) throws -> [String: Any] {

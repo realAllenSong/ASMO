@@ -5,8 +5,8 @@ import Foundation
 /// (an item moved or checked off in Calendar or Reminders comes back to 逐日).
 ///
 /// Items with a time are calendar events; items with only a day are reminders due that day. 逐日 wins when both
-/// sides changed. Something deleted in Calendar or Reminders is only let go of there (never deleted in 逐日):
-/// clearing finished reminders is a normal thing to do.
+/// sides changed. Something deleted in Calendar or Reminders is deleted in 逐日 too, unless it was done there
+/// (clearing finished reminders is housekeeping, not "this never happened"): a done one is only let go of.
 public struct MirrorItem: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable { case event, reminder }
 
@@ -80,8 +80,10 @@ public enum MirrorAction: Equatable, Sendable {
     case remove(UUID, identifier: String, kind: MirrorItem.Kind)
     /// The item was changed in Calendar or Reminders: change it in 逐日 to `MirrorItem`.
     case pull(UUID, MirrorItem)
-    /// Apple's copy was deleted there: stop writing it until the item changes in 逐日.
+    /// Apple's copy of a finished item was deleted there: stop writing it until the item changes in 逐日.
     case release(UUID)
+    /// Apple's copy was deleted there: delete the item in 逐日 (once it's checked that it really is gone).
+    case deleteHere(UUID, identifier: String)
 }
 
 public enum MirrorPlan {
@@ -97,8 +99,8 @@ public enum MirrorPlan {
             let record = written[id]
             guard let have = present[id] else {
                 if let record, !record.released, record.item == want {
-                    // Deleted in Calendar/Reminders while unchanged here: let go of it there.
-                    actions.append(.release(id))
+                    // Deleted in Calendar/Reminders while unchanged here: delete it here too, or (done) let go.
+                    actions.append(want.done ? .release(id) : .deleteHere(id, identifier: record.identifier))
                 } else if let record, record.released, record.item == want {
                     // Already let go of, and still unchanged here: nothing to do.
                 } else {

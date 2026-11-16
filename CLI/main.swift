@@ -30,6 +30,11 @@ The day's page (free notes under the items), written in Markdown
                                      rewrites the whole page; --after puts it after a block (or at the top)
   asmo page set DAY BLOCK [--file F] replace one block with the Markdown from stdin (or --file)
   asmo page rm DAY BLOCK…            remove blocks
+  asmo pages [FROM] [TO]             which days have a page, with each one's length and first line
+  asmo page import [--file F] [--replace|--append]
+                                     many days at once: a JSON object {"YYYY-MM-DD": "Markdown", …} on stdin;
+                                     by default only days with no page yet are written (--replace rewrites them,
+                                     --append adds below); one save, one undo
   asmo attach FILE… [--day DAY] [--caption TEXT]
                                      put pictures on the page
   Markdown: headings, **bold**, *italic*, ~~strike~~, `code`, [links](https://…), lists, - [ ] checkboxes,
@@ -231,6 +236,12 @@ let tools: [Tool] = [
                       "mode": ["type": "string", "enum": ["append", "replace"], "description": "replace rewrites the whole page"],
                       "after": described("string", "Put it after this block id, or \"top\"")],
          required: ["markdown"], request: { try pageRequest($0.merging(["cmd": "page-write"]) { _, new in new }) }),
+    Tool(name: "list_pages", about: "Which days have a page (in a range), each with its length and first line.",
+         properties: ["from": described("string", dayHelp), "to": described("string", dayHelp)], request: passing("pages")),
+    Tool(name: "import_pages", about: "Write many days' pages at once (an imported journal or history): pages is an object of YYYY-MM-DD → Markdown. mode missing (default) writes only days without a page, replace rewrites, append adds below. One undo.",
+         properties: ["pages": ["type": "object", "additionalProperties": stringType],
+                      "mode": ["type": "string", "enum": ["missing", "replace", "append"]]],
+         required: ["pages"], request: passing("page-import")),
     Tool(name: "set_page_block", about: "Replace one block of a day's page with new Markdown. Read the page first for the block ids.",
          properties: ["day": described("string", dayHelp), "block": described("string", "b1, b2, …"), "markdown": stringType],
          required: ["day", "block", "markdown"], request: { try pageRequest($0.merging(["cmd": "page-set"]) { _, new in new }) }),
@@ -355,7 +366,7 @@ func setUp(skill: String?) -> Never {
 var arguments = Array(CommandLine.arguments.dropFirst())
 var flags: [String: String] = [:]
 var words: [String] = []
-let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--lunar"]
+let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--append", "--lunar"]
 var index = 0
 while index < arguments.count {
     let argument = arguments[index]
@@ -446,12 +457,24 @@ do {
         case "set":
             guard rest.count == 3 else { fail("asmo page set DAY BLOCK   (Markdown on stdin, or --file F)") }
             request = try pageRequest(["cmd": "page-set", "day": rest[1], "block": rest[2], "markdown": markdownInput()])
+        case "import":
+            // {"YYYY-MM-DD": "Markdown", …} on stdin (or --file).
+            guard let data = markdownInput().data(using: .utf8),
+                  let pages = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] else {
+                fail("asmo page import: a JSON object of day → Markdown on stdin (or --file F)")
+            }
+            request = ["cmd": "page-import", "pages": pages,
+                       "mode": flags["--replace"] != nil ? "replace" : flags["--append"] != nil ? "append" : "missing"]
         case "rm":
             guard rest.count >= 3 else { fail("asmo page rm DAY BLOCK…") }
             request = ["cmd": "page-remove", "day": rest[1], "blocks": Array(rest.dropFirst(2))]
         default:
             request = ["cmd": "page", "day": rest.first ?? "today"]
         }
+    case "pages":
+        request = ["cmd": "pages"]
+        if let from = rest.first { request["from"] = from }
+        if rest.count > 1 { request["to"] = rest[1] }
     case "attach":
         guard !rest.isEmpty else { fail("asmo attach FILE… [--day DAY] [--caption TEXT]") }
         let caption = flag("caption") ?? ""

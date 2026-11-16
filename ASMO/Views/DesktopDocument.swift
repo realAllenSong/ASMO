@@ -242,9 +242,10 @@ struct DayDocumentView: NSViewRepresentable {
         scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
         if scrolls {
-            // Room to write below the last day, as in any document.
+            // No content insets: they shrink the area that takes clicks (the bottom of the window stopped
+            // reaching the text). Room below the last day comes from the text view's own height instead.
             scroll.automaticallyAdjustsContentInsets = false
-            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 240, right: 0)
+            scroll.contentInsets = NSEdgeInsets()
         }
         view.minSize = .zero
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
@@ -553,9 +554,10 @@ final class DocTextView: NSTextView {
             let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
             if let url { NSWorkspace.shared.open(url); return }
         }
-        if let index = characterIndex(at: point), let storage = textStorage, index < storage.length,
-           storage.attribute(.asmoCheck, at: index, effectiveRange: nil) != nil,
-           storage.attribute(.attachment, at: index, effectiveRange: nil) != nil {
+        // A click on an item's bullet (or checkbox) checks it off, or back on: the bullet goes grey and the line
+        // is struck through.
+        if event.clickCount == 1, let index = characterIndex(at: point), let storage = textStorage, index < storage.length,
+           storage.attribute(.asmoCheck, at: index, effectiveRange: nil) != nil {
             coordinator?.toggleCheck(at: index)
             return
         }
@@ -923,6 +925,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             let glyph = ["•", "◦", "▪", "‣"][min(line.depth, 3)]
             result.append(NSAttributedString(string: glyph, attributes: base.merging([
                 .foregroundColor: line.done ? quiet : accent.withAlphaComponent(0.85), .asmoCheck: line.id,
+                .cursor: NSCursor.pointingHand,
             ]) { $1 }))
             result.append(NSAttributedString(string: "  ", attributes: base))
         }
@@ -1255,7 +1258,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         guard let storage = view?.textStorage, NSMaxRange(range) <= storage.length else { return [] }
         let string = storage.string as NSString
         var runs: [TitleRun] = []
-        storage.enumerateAttributes(in: range) { attributes, sub, _ in
+        // A typed list marker ("• ") is the line's bullet, not part of its words (nor of whether they're struck).
+        for piece in PageController.withoutMarkers(range, in: storage) {
+        storage.enumerateAttributes(in: piece) { attributes, sub, _ in
             if attributes[.asmoTag] != nil || attributes[.asmoCheck] != nil || attributes[.asmoTime] != nil || attributes[.attachment] != nil { return }
             let text = string.substring(with: sub).replacingOccurrences(of: "\n", with: "").replacingOccurrences(of: "\t", with: "")
             guard !text.isEmpty else { return }
@@ -1266,6 +1271,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             } else {
                 runs.append(TitleRun(t: text, s: words.style, l: words.link))
             }
+        }
         }
         // Spaces at the ends aren't part of the title.
         while let first = runs.first, first.t.trimmingCharacters(in: .whitespaces).isEmpty { runs.removeFirst() }

@@ -321,10 +321,46 @@ final class PageController: ObservableObject {
             return
         }
         guard let storage = textView.textStorage else { return }
-        let has = (storage.attribute(key, at: range.location, effectiveRange: nil) as? Int ?? 0) != 0
+        // Lines, not their list markers: striking a bulleted line through leaves its bullet as it is.
+        let pieces = key == .strikethroughStyle || key == .underlineStyle ? Self.withoutMarkers(range, in: storage) : [range]
+        let probe = pieces.first?.location ?? range.location
+        let has = (storage.attribute(key, at: probe, effectiveRange: nil) as? Int ?? 0) != 0
         edit {
-            if has { storage.removeAttribute(key, range: range) } else { storage.addAttribute(key, value: value, range: range) }
+            for piece in pieces {
+                if has { storage.removeAttribute(key, range: piece) } else { storage.addAttribute(key, value: value, range: piece) }
+            }
         }
+    }
+
+    /// `range` without each line's list marker (its indent, a bullet or checkbox drawn for an item, or one typed
+    /// like "• ", "◦ ", "- ", "1. ").
+    nonisolated static func withoutMarkers(_ range: NSRange, in storage: NSTextStorage) -> [NSRange] {
+        let string = storage.string as NSString
+        var pieces: [NSRange] = []
+        var location = range.location
+        while location < NSMaxRange(range) {
+            let paragraph = string.paragraphRange(for: NSRange(location: location, length: 0))
+            var start = paragraph.location
+            // Drawn markers (an item's bullet or checkbox) carry their own attribute.
+            while start < NSMaxRange(paragraph), storage.attribute(.asmoCheck, at: start, effectiveRange: nil) != nil { start += 1 }
+            if start > paragraph.location {
+                while start < NSMaxRange(paragraph), [32, 9].contains(string.character(at: start)) { start += 1 }
+            }
+            let line = string.substring(with: NSRange(location: start, length: NSMaxRange(paragraph) - start))
+            // A typed one, on a line that has no drawn marker (an item's title may itself start with "1. ").
+            if start == paragraph.location, let marker = line.range(of: #"^[\t ]*(?:[•◦▪‣☐☑\-*]|\d{1,2}[.)、])[ \t]+"#, options: .regularExpression) {
+                start += (line[marker] as Substring).utf16.count
+            }
+            let from = max(start, range.location)
+            let to = min(NSMaxRange(paragraph), NSMaxRange(range))
+            // The line's own newline isn't struck either.
+            var end = to
+            if end > from, end == NSMaxRange(paragraph), string.character(at: end - 1) == 10 { end -= 1 }
+            if end > from { pieces.append(NSRange(location: from, length: end - from)) }
+            if NSMaxRange(paragraph) <= location { break }
+            location = NSMaxRange(paragraph)
+        }
+        return pieces
     }
 
     private func apply(_ change: (NSTextStorage, NSRange) -> Void) {

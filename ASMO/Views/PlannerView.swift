@@ -520,7 +520,11 @@ struct PlannerView: View {
         .background(theme.paper.ignoresSafeArea())
         .foregroundStyle(theme.ink)
         #if os(macOS)
-        .overlay(alignment: .bottom) { bottomControls }
+        // Only while there is something to show (a notice, the microphone): an empty layer there still took the
+        // clicks meant for the bottom of the document.
+        .overlay(alignment: .bottom) {
+            if notice != nil || voicePhase != nil { bottomControls }
+        }
         #endif
         .onChange(of: documentOrganizing) { _, busy in if !busy { voiceOrganizing = false } }
         .sheet(item: $editingRoutine) { routine in
@@ -901,6 +905,80 @@ struct PlannerView: View {
             return
         case "month":
             if let day = JournalDays.date(forKey: rest + "-01") { jump(toMonth: day) }
+        case "hitmap":
+            // Which view takes a click at points down the middle of the document (anything not the text covers it).
+            guard let window = view.window, let root = window.contentView, let scroll = view.enclosingScrollView else { return }
+            var rows: [String] = []
+            let fine = rest == "fine"
+            for fraction in stride(from: fine ? 0.80 : 0.02, through: 0.999, by: fine ? 0.005 : 0.04) {
+                for xf in fine ? [0.5] : [0.3, 0.5, 0.7] {
+                    let local = NSPoint(x: scroll.bounds.width * xf, y: scroll.bounds.height * fraction)
+                    let point = scroll.convert(local, to: nil)
+                    let hit = root.hitTest(root.superview?.convert(point, from: nil) ?? point)
+                    let name = hit.map { String(describing: type(of: $0)).prefix(40) } ?? "nil"
+                    if hit !== view { rows.append(String(format: "y %.3f (window y %.0f) x %.1f → %@", fraction, point.y, xf, String(name))) }
+                }
+            }
+            rows.insert("scroll in window \(scroll.convert(scroll.bounds, to: nil)) window content \(root.frame)", at: 0)
+            var chain: NSView? = scroll.superview
+            while let node = chain, node !== root {
+                rows.insert("  host \(String(describing: type(of: node)).prefix(50)) \(node.convert(node.bounds, to: nil)) flipped \(node.isFlipped)", at: 1)
+                chain = node.superview
+            }
+            try? (rows.count == 1 ? rows[0] + "\nall text" : rows.joined(separator: "\n")).write(to: out, atomically: true, encoding: .utf8)
+            return
+        case "click", "scrollto":
+            // "click:TEXT": a click in the middle of TEXT where it's drawn, sent to this window only; writes where the
+            // cursor landed. "scrollto:TEXT": scroll so TEXT is at the top of the window.
+            // "click:TEXT|N": the one character N away from where TEXT starts (N = -3: an item's bullet).
+            let parts = rest.components(separatedBy: "|")
+            let offset = parts.count > 1 ? Int(parts[1]) : nil
+            guard var range = find(parts[0]), let layout = view.layoutManager, let container = view.textContainer,
+                  let window = view.window, let clip = view.enclosingScrollView?.contentView else {
+                try? "not found".write(to: out, atomically: true, encoding: .utf8); return
+            }
+            if let offset { range = NSRange(location: max(0, range.location + offset), length: 1) }
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+            rect.origin.x += view.textContainerOrigin.x
+            rect.origin.y += view.textContainerOrigin.y
+            if verb == "scrollto" {
+                clip.scroll(to: NSPoint(x: 0, y: max(0, rect.minY - 30)))
+                view.enclosingScrollView?.reflectScrolledClipView(clip)
+                return
+            }
+            let point = view.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+            func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            // The text view's click waits for the button to come up: queue that first.
+            if let up = mouse(.leftMouseUp) { window.postEvent(up, atStart: false) }
+            // Straight to the view under the point (a window in the background takes its first click as "come
+            // forward" only), the way the window would route it.
+            if let down = mouse(.leftMouseDown), let target = window.contentView?.hitTest(window.contentView?.superview?.convert(point, from: nil) ?? point) {
+                if target !== view {
+                    try? "covered by \(type(of: target))".write(to: out, atomically: true, encoding: .utf8); return
+                }
+                target.mouseDown(with: down)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                let text = view.textStorage?.string ?? ""
+                let all = text as NSString
+                let at = view.selectedRange().location
+                let line = all.paragraphRange(for: NSRange(location: min(at, max(0, all.length - 1)), length: 0))
+                var probe = line.location
+                var heading = ""
+                while probe >= 0 {
+                    let paragraph = all.paragraphRange(for: NSRange(location: probe, length: 0))
+                    if view.textStorage?.attribute(.asmoDay, at: paragraph.location, effectiveRange: nil) != nil { heading = all.substring(with: paragraph); break }
+                    if paragraph.location == 0 { break }
+                    probe = paragraph.location - 1
+                }
+                try? "wanted \(rest) at y \(Int(rect.midY - clip.bounds.minY)) of \(Int(clip.bounds.height)) → line [\(all.substring(with: line).trimmed)] in [\(heading.trimmed)]"
+                    .write(to: out, atomically: true, encoding: .utf8)
+            }
+            return
         case "barclick":
             // "barclick:N": a click on the Nth button (from 0) of the bar next to the selection, sent to this
             // window only (the real mouse isn't touched).
@@ -1128,44 +1206,6 @@ struct PlannerView: View {
                 .buttonStyle(DesktopButtonStyle(theme: theme))
                 .help("显示目录")
             }
-            jumpButton
-        }
-    }
-
-    /// Go to any day: a month to pick from (year and month arrows), and 今天.
-    @State private var jumping = false
-    @State private var jumpPick = Date.now
-
-    private var jumpButton: some View {
-        Button {
-            jumpPick = (paperFocus ?? clock.today).date(in: clock.calendar) ?? .now
-            jumping = true
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "calendar").font(.system(size: 12, weight: .medium))
-                Text("跳到日期").font(.system(size: 12, weight: .medium))
-            }
-            .foregroundStyle(theme.quiet)
-            .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(DesktopButtonStyle(theme: theme))
-        .help("跳到某年某月某天 · 看日历请用苹果日历里的「逐日」")
-        .popover(isPresented: $jumping, arrowEdge: .bottom) {
-            VStack(spacing: 10) {
-                DatePicker("", selection: $jumpPick, displayedComponents: .date)
-                    .datePickerStyle(.graphical).labelsHidden()
-                    .onChange(of: jumpPick) { _, date in
-                        jumping = false
-                        jump(to: PlanDate.from(date, calendar: clock.calendar))
-                    }
-                HStack {
-                    Button("今天") { jumping = false; jump(to: clock.today) }
-                        .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(theme.accent)
-                    Spacer()
-                    Text("看日历：苹果日历里的「逐日」").font(.system(size: 11)).foregroundStyle(theme.quiet)
-                }
-            }
-            .padding(14).frame(width: 260)
         }
     }
 
@@ -1176,28 +1216,6 @@ struct PlannerView: View {
 
     /// Counts jumps: the document scrolls to its anchor on each.
     @State private var paperJump = 0
-
-    /// 文档 | 日历.
-    private var homeSwitch: some View {
-        HStack(spacing: 2) {
-            ForEach([("paper", "文档"), ("calendar", "日历")], id: \.0) { value, label in
-                Button {
-                    guard macHome != value else { return }
-                    if documentDay != nil { closeDocument() }
-                    pageController.textView?.window?.makeFirstResponder(nil)
-                    if value == "paper" { paperFocus = nil }
-                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { macHome = value }
-                } label: {
-                    Text(label.localized).font(.system(size: 12, weight: macHome == value ? .semibold : .medium))
-                        .foregroundStyle(macHome == value ? theme.accent : theme.quiet)
-                        .padding(.horizontal, 12).frame(height: 24).contentShape(Rectangle())
-                }
-                .buttonStyle(DesktopButtonStyle(theme: theme, selected: macHome == value))
-            }
-        }
-        .padding(3)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 9))
-    }
 
     /// Home on the Mac: one continuous document, a heading per day, today in front. Write in it like in any doc;
     /// lines become items by the date and time rules, agents write into the same pages, and it copies out as text
@@ -2594,7 +2612,8 @@ struct PlannerView: View {
             #endif
         case .asmoPageChanged:
             // An agent wrote on the page that is open: show it.
-            if let key = note.object as? String,
+            if note.object == nil { pageRebuild += 1 }
+            else if let key = note.object as? String,
                documentDay?.key == key || editingDay?.key == key || (macHome == "paper" && paperDays.contains { $0.key == key }) {
                 pageRebuild += 1
             }
@@ -3061,7 +3080,10 @@ struct PlannerView: View {
                     task.completed = struck
                     persist()
                 } else if line.kind == .routine, let instance = routineInstance(line.id, day: day), instance.done != struck {
-                    toggleRoutine(instance)
+                    // Struck = done that day, un-struck = not done (whatever mark the day had, a skip included).
+                    if let mark = routineMark(instance) { context.delete(mark) }
+                    if struck { context.insert(RoutineMark(routineID: instance.routine.id, dayKey: instance.day.key, skipped: false)) }
+                    persist()
                 }
             },
             editTag: { id in
@@ -3846,8 +3868,10 @@ struct PlannerView: View {
 
     private func toggleRoutine(_ instance: RoutineInstance) {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) {
+            // Done → not done; anything else (nothing, or skipped) → done.
+            let wasDone = instance.done
             if let mark = routineMark(instance) { context.delete(mark) }
-            else { context.insert(RoutineMark(routineID: instance.routine.id, dayKey: instance.day.key, skipped: false)) }
+            if !wasDone { context.insert(RoutineMark(routineID: instance.routine.id, dayKey: instance.day.key, skipped: false)) }
             persist()
         }
     }

@@ -49,17 +49,32 @@ struct MirrorPlanTests {
         #expect(actions == [.update(id, here, identifier: "e1")])
     }
 
-    @Test func deletedThereIsLetGoNotDeletedHere() {
+    @Test func deletedThereIsDeletedHere() {
         let actions = MirrorPlan.actions(wanted: [id: task()], present: [:],
                                          written: [id: MirrorRecord(item: task(), identifier: "e1")])
+        #expect(actions == [.deleteHere(id, identifier: "e1")])
+    }
+
+    @Test func finishedAndClearedThereIsOnlyLetGo() {
+        let done = task(hour: nil, done: true)
+        let actions = MirrorPlan.actions(wanted: [id: done], present: [:],
+                                         written: [id: MirrorRecord(item: done, identifier: "r1")])
         #expect(actions == [.release(id)])
-        let again = MirrorPlan.actions(wanted: [id: task()], present: [:],
-                                       written: [id: MirrorRecord(item: task(), identifier: "e1", released: true)])
+        let again = MirrorPlan.actions(wanted: [id: done], present: [:],
+                                       written: [id: MirrorRecord(item: done, identifier: "r1", released: true)])
         #expect(again.isEmpty)
         // Changed here later: written again.
-        let changed = MirrorPlan.actions(wanted: [id: task(hour: 10)], present: [:],
-                                         written: [id: MirrorRecord(item: task(), identifier: "e1", released: true)])
-        #expect(changed == [.create(id, task(hour: 10))])
+        let reopened = task(hour: nil)
+        let changed = MirrorPlan.actions(wanted: [id: reopened], present: [:],
+                                         written: [id: MirrorRecord(item: done, identifier: "r1", released: true)])
+        #expect(changed == [.create(id, reopened)])
+    }
+
+    @Test func changedHereAfterDeletedThereIsWrittenAgain() {
+        // Deleted there while it was also changed here: 逐日 wins, it comes back.
+        let actions = MirrorPlan.actions(wanted: [id: task(hour: 10)], present: [:],
+                                         written: [id: MirrorRecord(item: task(), identifier: "e1")])
+        #expect(actions == [.create(id, task(hour: 10))])
     }
 
     @Test func goneHereIsRemovedThere() {
