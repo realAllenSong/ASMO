@@ -583,6 +583,17 @@ final class DocTextView: NSTextView {
 enum SharedFonts {
     nonisolated(unsafe) private static var known: [String: NSFont] = [:]
     nonisolated(unsafe) private static var shared = Set<ObjectIdentifier>()
+    /// For a substitute (Chinese is drawn with PingFang): the page's own font at its size and weight. Bold, italic
+    /// and sizes are worked out from that one (PingFang can't be made bold by name); the text system then picks
+    /// the matching substitute again. Any other font is itself.
+    static func base(of font: NSFont) -> NSFont {
+        guard shared.contains(ObjectIdentifier(font)) else { return font }
+        let name = font.fontName.lowercased()
+        let weight: NSFont.Weight = name.contains("heavy") || name.contains("black") ? .heavy
+            : name.contains("semibold") ? .semibold : name.contains("bold") ? .bold
+            : name.contains("medium") ? .medium : name.contains("light") || name.contains("thin") ? .light : .regular
+        return NSFont.systemFont(ofSize: font.pointSize, weight: weight)
+    }
 
     private static func unique(_ font: NSFont) -> NSFont {
         let key = font.fontName + "|" + String(Double(font.pointSize))
@@ -1121,6 +1132,64 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     }
 
     /// Saves now if something is waiting (the app is going to the background or quitting).
+    // MARK: Repeating (the toolbar's 重复 menu)
+
+    /// The ways the line at the cursor can repeat, named for its day ("每周日", "每月15日"); nil on a date.
+    func repeatChoices() -> [(label: String, tag: String)]? {
+        guard let view, let storage = view.textStorage else { return nil }
+        let at = min(view.selectedRange().location, max(0, storage.length - 1))
+        guard let paragraph = paragraphs().last(where: { $0.range.location <= at }), !paragraph.isHeading,
+              let day = paragraph.day ?? self.day(at: at), let date = day.dayOnly.date(in: Calendar.current) else { return nil }
+        if let kind = paragraph.kind, kind.readOnly { return nil }
+        let weekday = ["日", "一", "二", "三", "四", "五", "六"][Calendar.current.component(.weekday, from: date) - 1]
+        let dayOfMonth = day.day ?? 1
+        return [(String(localized: "每天"), "每天"),
+                (String(localized: "工作日（周一到周五）"), "工作日"),
+                (String(localized: "每周\(weekday)"), "每周\(weekday)"),
+                (String(localized: "每月\(dayOfMonth)日"), "每月\(dayOfMonth)号")]
+    }
+
+    /// Makes the line at the cursor repeat by `tag` ("每天", "每周三", "每月15号"), right away: an item becomes a
+    /// repeating one, a repeating one changes its rule, a line of writing becomes a repeating item. On an empty
+    /// line the rule waits at its end for the words.
+    func applyRepeat(_ tag: String) {
+        guard let view, let storage = view.textStorage else { return }
+        let string = storage.string as NSString
+        let at = min(view.selectedRange().location, max(0, storage.length - 1))
+        let paragraphRange = string.paragraphRange(for: NSRange(location: at, length: 0))
+        guard let paragraph = paragraphs().last(where: { $0.range.location <= at }), !paragraph.isHeading else { return }
+        var end = NSMaxRange(paragraphRange)
+        if end > paragraphRange.location, string.character(at: end - 1) == 10 { end -= 1 }
+        // A rule typed earlier at the end of the line is replaced, not added to.
+        var start = end
+        let typed = string.substring(with: NSRange(location: paragraphRange.location, length: end - paragraphRange.location))
+        if let old = typed.range(of: #"\s*[#＃]\s*(每天|每日|天天|工作日|周末|每周[一二三四五六日天、和,，\s]*|每月\d{0,2}[号日]?)\s*$"#, options: .regularExpression) {
+            start = paragraphRange.location + typed.utf16.distance(from: typed.utf16.startIndex, to: old.lowerBound.samePosition(in: typed.utf16)!)
+        }
+        var attributes = view.typingAttributes
+        for key in [NSAttributedString.Key.asmoTag, .asmoCheck, .asmoTime, .asmoLine, .asmoDay, .attachment, .link] { attributes[key] = nil }
+        attributes[.font] = attributes[.font] ?? NSFont.systemFont(ofSize: 15)
+        let addition = " #" + tag
+        let range = NSRange(location: start, length: end - start)
+        guard view.shouldChangeText(in: range, replacementString: addition) else { return }
+        storage.replaceCharacters(in: range, with: NSAttributedString(string: addition, attributes: attributes))
+        view.didChangeText()
+        let words = paragraph.text
+            .replacingOccurrences(of: #"^[\s•◦▪‣☐☑*-]*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s*[#＃].*$"#, with: "", options: .regularExpression).trimmed
+        if words.isEmpty {
+            // Nothing written yet (an empty line, or just its bullet): the words go before the rule.
+            view.setSelectedRange(NSRange(location: start, length: 0))
+            return
+        }
+        pendingSync?.cancel()
+        if paragraph.id != nil {
+            syncEdits()
+        } else {
+            organize(includingCurrent: true)
+        }
+    }
+
     func saveNow() {
         guard let pending = pendingSync, !pending.isCancelled else { return }
         pending.cancel()
@@ -1236,7 +1305,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     /// The formatting of one stretch of text, as style words (and its link).
     private func styleWords(_ attributes: [NSAttributedString.Key: Any]) -> (style: String, link: String?) {
         var parts: [String] = []
-        if let font = attributes[.font] as? NSFont {
+        if let font = (attributes[.font] as? NSFont).map(SharedFonts.base) {
             let traits = NSFontManager.shared.traits(of: font)
             if font.isFixedPitch || font.fontName.lowercased().contains("mono") { parts.append("code") }
             else if traits.contains(.boldFontMask) || NSFontManager.shared.weight(of: font) >= 8 { parts.append("b") }
@@ -1920,6 +1989,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         }
         // After a day heading (or with no font) writing starts plain; a heading the writer made keeps its size.
         if textView.typingAttributes[.asmoDay] != nil || attributes[.font] == nil { attributes[.font] = bodyFont }
+        // Typing goes on in the page's own font, not the substitute the last Chinese character was drawn with
+        // (English after Chinese came out in PingFang).
+        if let font = attributes[.font] as? NSFont { attributes[.font] = SharedFonts.base(of: font) }
         if attributes[.strikethroughStyle] != nil { attributes[.strikethroughStyle] = nil; attributes[.foregroundColor] = ink }
         textView.typingAttributes = attributes
     }

@@ -12,6 +12,8 @@ struct RoutineDraft: Sendable, Equatable {
     var weekdays: Set<Int>
     var startMinute: Int?
     var endMinute: Int?
+    /// Monthly: the day of the month (a shorter month uses its last day). `weekdays` is then unused.
+    var monthDay: Int? = nil
 }
 
 /// Turns free speech or a run-on line into separate items, all on-device and without a model:
@@ -123,7 +125,7 @@ enum RoutineParser {
     /// Recognizes "每天八点做大眼操", "每周一四练胸和肩", "工作日 7:30 跑步", "周末睡懒觉" (with a 每/周末/工作日 lead).
     /// "喝水 #每天" → "每天 喝水": a repeat written as a tag at the end reads like one at the start.
     static func tagFirst(_ text: String) -> String {
-        guard let parts = text.trimmed.match(#"^(.*?)\s*[#＃]\s*(每天|每日|天天|工作日|周末|每周(?:[一二三四五六日天][、和,，\s]*)+)\s*$"#),
+        guard let parts = text.trimmed.match(#"^(.*?)\s*[#＃]\s*(每天|每日|天天|工作日|周末|每周(?:[一二三四五六日天][、和,，\s]*)*|每月(?:\d{1,2}[号日]?)?)\s*$"#),
               !parts[1].trimmed.isEmpty else { return text }
         // As a tag, "周末" / "工作日" mean every weekend / workday.
         let rule = parts[2].trimmed == "周末" ? "每个周末" : parts[2].trimmed == "工作日" ? "每个工作日" : parts[2].trimmed
@@ -134,7 +136,15 @@ enum RoutineParser {
         var source = tagFirst(text).trimmed.replacingOccurrences(of: #"^(?:我们|我)\s*"#, with: "", options: .regularExpression)
         let everyDay = #"^(?:每天|每日|天天|每一天|每晚|每早|每天早上|every day|daily)\s*"#
         let weekdays: Set<Int>
-        if let lead = source.match(everyDay)?.first {
+        var monthDay: Int?
+        if let parts = source.match(#"^每(?:个)?月(?:的)?\s*(\d{1,2}|[一二三四五六七八九十]{1,3})?\s*[号日]?\s*"#) {
+            // "每月15号 交房租", "每月 交房租" (the day of the page it's written on), "交房租 #每月".
+            let day = parts[1].isEmpty ? clock.today.day : CaptureParser.number(parts[1])
+            guard let day, (1...31).contains(day) else { return nil }
+            monthDay = day
+            weekdays = Set(1...7)
+            source = String(source.dropFirst(parts[0].count))
+        } else if let lead = source.match(everyDay)?.first {
             weekdays = Set(1...7)
             // "每晚十点" / "每早七点" keep their part of day for the time parser.
             let keep = lead.hasPrefix("每晚") ? "晚上" : lead.hasPrefix("每早") || lead.hasPrefix("每天早上") ? "早上" : ""
@@ -149,6 +159,11 @@ enum RoutineParser {
             let map: [Character: Int] = ["日": 1, "天": 1, "一": 2, "二": 3, "三": 4, "四": 5, "五": 6, "六": 7]
             weekdays = Set(parts[1].compactMap { map[$0] })
             source = String(source.dropFirst(parts[0].count))
+        } else if let lead = source.match(#"^每(?:个)?(?:周|星期|礼拜)\s+"#)?.first {
+            // "每周 开组会": on the weekday of the page it's written on.
+            guard let date = clock.today.date(in: clock.calendar) else { return nil }
+            weekdays = [clock.calendar.component(.weekday, from: date)]
+            source = String(source.dropFirst(lead.count))
         } else {
             return nil
         }
@@ -157,7 +172,14 @@ enum RoutineParser {
         let title = Dictation.cleanTitle(draft.title)
         guard !title.isEmpty else { return nil }
         let start = draft.schedule?.hour.map { $0 * 60 + (draft.schedule?.minute ?? 0) }
-        return RoutineDraft(title: title, weekdays: weekdays, startMinute: start, endMinute: start == nil ? nil : draft.endMinute)
+        return RoutineDraft(title: title, weekdays: weekdays, startMinute: start, endMinute: start == nil ? nil : draft.endMinute,
+                            monthDay: monthDay)
+    }
+
+    /// "每天", "工作日", "每周一三", or "每月15日".
+    static func label(_ weekdays: Set<Int>, monthDay: Int?) -> String {
+        if let monthDay { return String(localized: "每月\(monthDay)日") }
+        return label(weekdays)
     }
 
     static func label(_ weekdays: Set<Int>) -> String {

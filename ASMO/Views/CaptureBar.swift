@@ -250,7 +250,7 @@ struct CaptureBar: View {
     private func when(_ item: DictatedItem) -> String {
         switch item {
         case .routine(let routine):
-            return RoutineParser.label(routine.weekdays) + (routine.startMinute.map { " " + PlannerClockTime.label($0) } ?? "")
+            return RoutineParser.label(routine.weekdays, monthDay: routine.monthDay) + (routine.startMinute.map { " " + PlannerClockTime.label($0) } ?? "")
         case .task(let draft):
             guard let schedule = draft.schedule else { return String(localized: "未安排") }
             guard schedule.day != nil else { return String(localized: "\(schedule.month) 月") }

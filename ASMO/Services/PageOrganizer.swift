@@ -80,8 +80,8 @@ final class PageOrganizer {
             // The line itself says how it repeats ("工作日 晚上十点冥想", "喝水 #每天"): that wins over the model's date.
             if let from = lineIndex(of: title, in: lines),
                let rule = RoutineParser.parse(lines[from].trimmingCharacters(in: .whitespaces), clock: clock) {
-                words.append(rule.weekdays.count == 7 ? "每天" : rule.weekdays == [2, 3, 4, 5, 6] ? "每个工作日"
-                             : rule.weekdays == [1, 7] ? "每个周末" : RoutineParser.label(rule.weekdays))
+                words.append(rule.monthDay.map { "每月\($0)日" } ?? (rule.weekdays.count == 7 ? "每天" : rule.weekdays == [2, 3, 4, 5, 6] ? "每个工作日"
+                             : rule.weekdays == [1, 7] ? "每个周末" : RoutineParser.label(rule.weekdays)))
             } else if let date = absoluteDate(item.date, clock: clock) { words.append(date) }
             // A time has to be in the writing too: the model sometimes copies one from a context item.
             if let start = clockText(item.start), Dictation.clockGrounded(start, in: source) {

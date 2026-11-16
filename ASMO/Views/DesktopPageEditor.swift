@@ -108,7 +108,32 @@ final class PageController: ObservableObject {
 
     /// The line with the cursor repeats every day: " #每天" goes on its end (the page turns it into a routine;
     /// click the tag afterwards to choose other days).
+    /// 重复: a menu by the line (每天 / 工作日 / 每周X / 每月N日, named for the line's day) that makes it repeat
+    /// right away. Outside the document (no days), the old way: " #每天" at the end of the line.
     func makeRepeating() {
+        if let view = textView as? DocTextView, let coordinator = view.coordinator {
+            guard let choices = coordinator.repeatChoices() else { NSSound.beep(); return }
+            let menu = NSMenu()
+            for choice in choices {
+                let item = NSMenuItem(title: choice.label, action: #selector(RepeatTarget.pick(_:)), keyEquivalent: "")
+                item.representedObject = choice.tag
+                item.target = RepeatTarget.shared
+                menu.addItem(item)
+            }
+            RepeatTarget.shared.apply = { [weak coordinator] tag in coordinator?.applyRepeat(tag) }
+            var point = NSPoint(x: 40, y: 40)
+            if let layout = view.layoutManager, let container = view.textContainer {
+                let glyph = layout.glyphIndexForCharacter(at: min(view.selectedRange().location, max(0, (view.textStorage?.length ?? 1) - 1)))
+                let rect = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                point = NSPoint(x: view.textContainerOrigin.x + 24, y: view.textContainerOrigin.y + rect.maxY + 4)
+            }
+            menu.popUp(positioning: nil, at: point, in: view)
+            return
+        }
+        makeRepeatingByTag()
+    }
+
+    private func makeRepeatingByTag() {
         guard let textView, let storage = textView.textStorage else { return }
         let string = storage.string as NSString
         let paragraph = string.paragraphRange(for: textView.selectedRange())
@@ -265,7 +290,7 @@ final class PageController: ObservableObject {
         let start = min(range.location + indent, max(0, storage.length - 1))
         let attributes = storage.attributes(at: start, effectiveRange: nil)
         var parts: [String] = []
-        if let font = attributes[.font] as? NSFont {
+        if let font = (attributes[.font] as? NSFont).map(SharedFonts.base) {
             let traits = NSFontManager.shared.traits(of: font)
             if traits.contains(.boldFontMask) { parts.append("b") }
             if traits.contains(.italicFontMask) { parts.append("i") }
@@ -288,19 +313,20 @@ final class PageController: ObservableObject {
         let range = textView.selectedRange()
         guard let storage = textView.textStorage else { return }
         if range.length == 0 {
-            let font = (textView.typingAttributes[.font] as? NSFont) ?? PageTextView.bodyFont
+            let font = SharedFonts.base(of: (textView.typingAttributes[.font] as? NSFont) ?? PageTextView.bodyFont)
             let slanted = ((textView.typingAttributes[.obliqueness] as? CGFloat) ?? 0) > 0.05
             let has = manager.traits(of: font).contains(trait) || (trait == .italicFontMask && slanted)
             textView.typingAttributes[.font] = has ? manager.convert(font, toNotHaveTrait: trait) : manager.convert(font, toHaveTrait: trait)
             if trait == .italicFontMask { textView.typingAttributes[.obliqueness] = has ? nil : 0.18 }
             return
         }
-        let first = (storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont) ?? PageTextView.bodyFont
+        let first = SharedFonts.base(of: (storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont) ?? PageTextView.bodyFont)
         let slanted = ((storage.attribute(.obliqueness, at: range.location, effectiveRange: nil) as? CGFloat) ?? 0) > 0.05
         let adding = trait == .italicFontMask ? !(manager.traits(of: first).contains(trait) || slanted) : !manager.traits(of: first).contains(trait)
         edit {
             storage.enumerateAttribute(.font, in: range) { value, sub, _ in
-                let font = (value as? NSFont) ?? PageTextView.bodyFont
+                // The run's own font, not a substitute (Chinese is drawn with one): the substitute follows.
+                let font = SharedFonts.base(of: (value as? NSFont) ?? PageTextView.bodyFont)
                 storage.addAttribute(.font, value: adding ? manager.convert(font, toHaveTrait: trait)
                                                           : manager.convert(font, toNotHaveTrait: trait), range: sub)
             }
@@ -619,7 +645,7 @@ enum MarkdownShortcuts {
                 let styled = NSRange(location: openOffset, length: contentLength)
                 if apply == "b" {
                     storage.enumerateAttribute(.font, in: styled) { value, sub, _ in
-                        let font = (value as? NSFont) ?? PageTextView.bodyFont
+                        let font = SharedFonts.base(of: (value as? NSFont) ?? PageTextView.bodyFont)
                         storage.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask), range: sub)
                     }
                 } else if apply == "h" {
@@ -659,7 +685,7 @@ struct PageToolbar: View {
             tool("textformat.size.larger", "标题（留在页面上，不变成待办）", controller.toggleHeading)
             tool("list.bullet", "项目符号", { controller.toggleLinePrefix("• ") })
             tool("checklist", "勾选框", { controller.toggleLinePrefix("☐ ") })
-            tool("repeat", "设为每天重复（这一行）· 也可以写「每天…」或「… #每周一三」", controller.makeRepeating)
+            tool("repeat", "重复（这一行）：每天 / 工作日 / 每周 / 每月 · 也可以直接写「每天…」「每月15号…」或「… #每周一三」", controller.makeRepeating)
             tool("link", "链接 ⌘K", controller.link)
             tool("photo", "插入图片", controller.insertImage)
             if let organize {
@@ -780,6 +806,16 @@ struct LinkBox: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .onAppear { focused = true }
+    }
+}
+/// The 重复 menu's items call back here (an NSMenu needs an object to send to).
+@MainActor
+final class RepeatTarget: NSObject {
+    static let shared = RepeatTarget()
+    var apply: ((String) -> Void)?
+
+    @objc func pick(_ sender: NSMenuItem) {
+        if let tag = sender.representedObject as? String { apply?(tag) }
     }
 }
 #endif

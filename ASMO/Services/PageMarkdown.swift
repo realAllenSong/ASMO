@@ -571,7 +571,8 @@ enum PageMarkdown {
             let lead = String(text.prefix { $0 == " " }), trail = String(text.reversed().prefix { $0 == " " })
             text = text.trimmingCharacters(in: CharacterSet(charactersIn: " "))
             guard !text.isEmpty else { result += lead; return }
-            let font = attributes[.font] as? NSFont
+            // Chinese is drawn with a substitute font: whether it's bold is the run's own font's.
+            let font = (attributes[.font] as? NSFont).map(SharedFonts.base)
             let traits = font.map { NSFontManager.shared.traits(of: $0) } ?? []
             let background = attributes[.backgroundColor] as? NSColor
             let slanted = (attributes[.obliqueness] as? CGFloat ?? 0) > 0

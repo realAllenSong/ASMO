@@ -905,6 +905,15 @@ struct PlannerView: View {
             return
         case "month":
             if let day = JournalDays.date(forKey: rest + "-01") { jump(toMonth: day) }
+        case "repeat":
+            // "repeat:每月15号": as if picked in the 重复 menu; "repeat:" lists the menu.
+            guard let coordinator = (view as? DocTextView)?.coordinator else { return }
+            if rest.isEmpty {
+                let choices = coordinator.repeatChoices()?.map { "\($0.label) → \($0.tag)" }.joined(separator: "\n") ?? "no menu here"
+                try? choices.write(to: out, atomically: true, encoding: .utf8)
+                return
+            }
+            coordinator.applyRepeat(rest)
         case "hitmap":
             // Which view takes a click at points down the middle of the document (anything not the text covers it).
             guard let window = view.window, let root = window.contentView, let scroll = view.enclosingScrollView else { return }
@@ -1040,6 +1049,8 @@ struct PlannerView: View {
             case "check": pageController.toggleLinePrefix("☐ ")
             case "link": pageController.link()
             case "red": pageController.color(.systemRed)
+            case "eraser": pageController.color(nil)
+            case "image": if let image = NSImage(named: NSImage.applicationIconName) { view.insertImage(image) }
             case "repeat": pageController.makeRepeating()
             default: break
             }
@@ -1078,7 +1089,7 @@ struct PlannerView: View {
                 "S| \(task.completed ? "[x]" : "[ ]") \(task.title)\(task.titleStyle.map { " {\($0)}" } ?? "")\(task.parentID.flatMap { byID[$0]?.title }.map { " ↳ " + $0 } ?? "")"
             }
             let repeats = routines.map { routine in
-                "R| \(routine.title) \(RoutineParser.label(routine.weekdays)) \(routine.startMinute.map { String(format: "%02d:%02d", $0 / 60, $0 % 60) } ?? "-")\(routine.endDay.map { " ends " + $0 } ?? "")"
+                "R| \(routine.title) \(routine.ruleLabel) \(routine.startMinute.map { String(format: "%02d:%02d", $0 / 60, $0 % 60) } ?? "-")\(routine.endDay.map { " ends " + $0 } ?? "")"
             }
             try? (lines + ["--- stored"] + items + repeats).joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
         default: break
@@ -1206,6 +1217,17 @@ struct PlannerView: View {
                 .buttonStyle(DesktopButtonStyle(theme: theme))
                 .help("显示目录")
             }
+            // Back to this month (to today in it), wherever the document is: ⇧⌘T too.
+            Button { jump(to: clock.today) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
+                    Text("本月").font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(theme.quiet)
+                .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(DesktopButtonStyle(theme: theme))
+            .help("回到这个月（今天） ⇧⌘T")
         }
     }
 
@@ -3005,7 +3027,7 @@ struct PlannerView: View {
             top.append((routine.startMinute, routine.createdAt,
                         [DocLine(kind: .routine, id: routine.id.uuidString + "|" + day.key,
                                  time: time(routine.startMinute, end: routine.endMinute), title: routine.title,
-                                 done: instance.done, tag: RoutineParser.label(routine.weekdays))]))
+                                 done: instance.done, tag: routine.ruleLabel)]))
         }
         for event in (journalEvents.days[day] ?? []) where event.asmoID.map({ !ids.contains($0) }) ?? true {
             if event.importantKind != nil {
@@ -3228,11 +3250,11 @@ struct PlannerView: View {
                 context.insert(task)
                 OrganizeBatch.current?.created.append(task.id)
             case .routine(let draft):
-                let routine = RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
+                let routine = RoutineRecord(title: draft.title, weekdays: draft.weekdays, monthDay: draft.monthDay, startMinute: draft.startMinute,
                                             endMinute: draft.endMinute, startDay: clock.today.key,
                                             order: (routines.map(\.order).max() ?? 0) + 1)
                 // Already a running routine ("每天喝水" said again): nothing new.
-                if routines.contains(where: { $0.endDay == nil && $0.weekdays == draft.weekdays && Dictation.sameThing($0.title, draft.title) }) {
+                if routines.contains(where: { $0.endDay == nil && $0.weekdays == draft.weekdays && $0.monthDay == draft.monthDay && Dictation.sameThing($0.title, draft.title) }) {
                     continue
                 }
                 context.insert(routine)
@@ -3240,7 +3262,7 @@ struct PlannerView: View {
                 if day == clock.today && routine.applies(to: day, calendar: clock.calendar) {
                     here.append(DocLine(kind: .routine, id: routine.id.uuidString + "|" + day.key,
                                         time: draft.startMinute.map { PlannerClockTime.label($0) }, title: draft.title,
-                                        tag: RoutineParser.label(draft.weekdays)))
+                                        tag: RoutineParser.label(draft.weekdays, monthDay: draft.monthDay)))
                 }
             }
         }
@@ -3261,16 +3283,17 @@ struct PlannerView: View {
         let written = text.trimmed
         guard !written.isEmpty else { return nil }
         if let draft = RoutineParser.parse(written, clock: relative),
-           !routines.contains(where: { $0.endDay == nil && $0.weekdays == draft.weekdays && Dictation.sameThing($0.title, draft.title) }) {
-            let routine = RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
-                                        endMinute: draft.endMinute, startDay: clock.today.key,
+           !routines.contains(where: { $0.endDay == nil && $0.weekdays == draft.weekdays && $0.monthDay == draft.monthDay && Dictation.sameThing($0.title, draft.title) }) {
+            let routine = RoutineRecord(title: draft.title, weekdays: draft.weekdays, monthDay: draft.monthDay, startMinute: draft.startMinute,
+                                        // From the day it's written on (today at the earliest).
+                                        endMinute: draft.endMinute, startDay: max(day.dayOnly, clock.today).key,
                                         order: (routines.map(\.order).max() ?? 0) + 1)
             context.insert(routine)
             persist()
-            guard day == clock.today, routine.applies(to: day, calendar: clock.calendar) else { return [] }
+            guard routine.applies(to: day, calendar: clock.calendar) else { return [] }
             return [DocLine(kind: .routine, id: routine.id.uuidString + "|" + day.key,
                             time: draft.startMinute.map { PlannerClockTime.label($0) }, title: draft.title,
-                            tag: RoutineParser.label(draft.weekdays))]
+                            tag: RoutineParser.label(draft.weekdays, monthDay: draft.monthDay))]
         }
         let draft = CaptureParser.manual(written, clock: relative, selectedDay: day)
         // A date or time counts only where a writer puts one on purpose: at the start of the line ("明天 交材料",
@@ -3333,7 +3356,7 @@ struct PlannerView: View {
         for instance in routineInstances(on: day) {
             let routine = instance.routine
             add("routine:" + routine.id.uuidString,
-                "\(RoutineParser.label(routine.weekdays)) \(when(routine.startMinute, routine.endMinute))\(routine.title)\(instance.done ? "（今天已完成）" : "")")
+                "\(routine.ruleLabel) \(when(routine.startMinute, routine.endMinute))\(routine.title)\(instance.done ? "（今天已完成）" : "")")
         }
         // Open items on the days right around the page, and any open item in the next three weeks that shares
         // words with what was written ("和导师开会" finds Wednesday's meeting). A long unrelated list only
@@ -3513,13 +3536,14 @@ struct PlannerView: View {
             let routine = instance.routine
             if let rule = RoutineParser.parse(text, clock: pageClock(day)) {
                 guard routine.title != rule.title || routine.startMinute != rule.startMinute || routine.weekdays != rule.weekdays
-                        || routine.endMinute != rule.endMinute else { return }
+                        || routine.endMinute != rule.endMinute || routine.monthDay != rule.monthDay else { return }
                 routine.title = rule.title
                 routine.weekdays = rule.weekdays
+                routine.monthDay = rule.monthDay
                 routine.startMinute = rule.startMinute
                 routine.endMinute = rule.endMinute
                 persist()
-                announce(String(localized: "「\(rule.title)」改成\(RoutineParser.label(rule.weekdays))"))
+                announce(String(localized: "「\(rule.title)」改成\(RoutineParser.label(rule.weekdays, monthDay: rule.monthDay))"))
                 return
             }
             guard routine.title != title || routine.startMinute != minute else { return }
@@ -3653,7 +3677,7 @@ struct PlannerView: View {
                 }
                 added.append(task)
             case .routine(let draft):
-                newRoutines.append(RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
+                newRoutines.append(RoutineRecord(title: draft.title, weekdays: draft.weekdays, monthDay: draft.monthDay, startMinute: draft.startMinute,
                                                  endMinute: draft.endMinute, startDay: clock.today.key,
                                                  order: (routines.map(\.order).max() ?? 0) + 1 + newRoutines.count))
             }
@@ -3672,7 +3696,7 @@ struct PlannerView: View {
         if count == 1, let task = added.first {
             text = String(localized: "已记下 · ") + heardLabel(CaptureDraft(title: task.title, original: task.title, schedule: task.schedule))
         } else if count == 1, let routine = newRoutines.first {
-            text = String(localized: "已加入每日 · \(RoutineParser.label(routine.weekdays)) \(routine.title)")
+            text = String(localized: "已加入每日 · \(routine.ruleLabel) \(routine.title)")
         } else if count > 1 {
             let days = Set(added.compactMap { $0.schedule?.dayOnly.key }).count
             text = String(localized: "已记下 \(count) 件") + (days > 1 ? String(localized: "，分到 \(days) 天") : "") + (newRoutines.isEmpty ? "" : String(localized: "（含 \(newRoutines.count) 个每日）"))
@@ -3718,7 +3742,7 @@ struct PlannerView: View {
                 added.append(task)
                 node.children.forEach { file($0, parent: task.id) }
             case .routine(let draft):
-                newRoutines.append(RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
+                newRoutines.append(RoutineRecord(title: draft.title, weekdays: draft.weekdays, monthDay: draft.monthDay, startMinute: draft.startMinute,
                                                  endMinute: draft.endMinute, startDay: clock.today.key,
                                                  order: baseOrder + 1 + newRoutines.count))
             }
@@ -3853,7 +3877,7 @@ struct PlannerView: View {
                                  },
                                  delete: { skipRoutine(instance) },
                                  rename: { updateRoutine(routine, title: $0, weekdays: routine.weekdays) },
-                                 tag: RoutineParser.label(routine.weekdays),
+                                 tag: routine.ruleLabel,
                                  editTag: { editingRoutine = routine })
         }
         guard !daily.isEmpty else { return entries }
@@ -3911,12 +3935,12 @@ struct PlannerView: View {
         let key = day.dayOnly.key
         let label = String(localized: "\(day.month)月\(day.day ?? 1)日")
         if routine.startDay >= key {
-            let snapshot = (title: routine.title, weekdays: routine.weekdays, start: routine.startMinute,
+            let snapshot = (title: routine.title, weekdays: routine.weekdays, monthDay: routine.monthDay, start: routine.startMinute,
                             end: routine.endMinute, startDay: routine.startDay, order: routine.order, id: routine.id)
             context.delete(routine)
             persist()
             let bringBack = {
-                let restored = RoutineRecord(title: snapshot.title, weekdays: snapshot.weekdays, startMinute: snapshot.start,
+                let restored = RoutineRecord(title: snapshot.title, weekdays: snapshot.weekdays, monthDay: snapshot.monthDay, startMinute: snapshot.start,
                                              endMinute: snapshot.end, startDay: snapshot.startDay, order: snapshot.order)
                 restored.id = snapshot.id
                 context.insert(restored)
@@ -3942,12 +3966,12 @@ struct PlannerView: View {
         let today = clock.today.key
         let title = routine.title
         if routine.startDay >= today {
-            let snapshot = (title: routine.title, weekdays: routine.weekdays, start: routine.startMinute,
+            let snapshot = (title: routine.title, weekdays: routine.weekdays, monthDay: routine.monthDay, start: routine.startMinute,
                             end: routine.endMinute, startDay: routine.startDay, order: routine.order)
             context.delete(routine)
             persist()
             announce(String(localized: "「\(title)」不再重复")) {
-                context.insert(RoutineRecord(title: snapshot.title, weekdays: snapshot.weekdays, startMinute: snapshot.start,
+                context.insert(RoutineRecord(title: snapshot.title, weekdays: snapshot.weekdays, monthDay: snapshot.monthDay, startMinute: snapshot.start,
                                              endMinute: snapshot.end, startDay: snapshot.startDay, order: snapshot.order))
                 persist()
             }
@@ -3993,14 +4017,14 @@ struct PlannerView: View {
 
     /// An item turned into a repeating one (its line got a repeat rule). Undo brings the item back.
     private func makeRoutine(from task: TaskRecord, rule: RoutineDraft, day: PlanDate) {
-        let routine = RoutineRecord(title: rule.title, weekdays: rule.weekdays, startMinute: rule.startMinute,
+        let routine = RoutineRecord(title: rule.title, weekdays: rule.weekdays, monthDay: rule.monthDay, startMinute: rule.startMinute,
                                     endMinute: rule.endMinute, startDay: day.dayOnly.key,
                                     order: (routines.map(\.order).max() ?? 0) + 1)
         let snapshot = (id: task.id, title: task.title, schedule: task.schedule, end: task.endMinute, created: task.createdAt)
         context.insert(routine)
         context.delete(task)
         persist()
-        announce(String(localized: "「\(rule.title)」改成\(RoutineParser.label(rule.weekdays))重复")) {
+        announce(String(localized: "「\(rule.title)」改成\(RoutineParser.label(rule.weekdays, monthDay: rule.monthDay))重复")) {
             context.delete(routine)
             let back = TaskRecord(id: snapshot.id, title: snapshot.title, note: "", schedule: snapshot.schedule, endMinute: snapshot.end)
             back.createdAt = snapshot.created
@@ -4016,7 +4040,7 @@ struct PlannerView: View {
         let draft = RoutineParser.parse(source, clock: clock) ?? RoutineParser.parse("每天" + source, clock: clock)
         guard let draft else { return false }
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) {
-            context.insert(RoutineRecord(title: draft.title, weekdays: draft.weekdays, startMinute: draft.startMinute,
+            context.insert(RoutineRecord(title: draft.title, weekdays: draft.weekdays, monthDay: draft.monthDay, startMinute: draft.startMinute,
                                          endMinute: draft.endMinute, startDay: clock.today.key,
                                          order: (routines.map(\.order).max() ?? 0) + 1))
             persist()

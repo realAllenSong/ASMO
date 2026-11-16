@@ -70,7 +70,7 @@ private struct DesktopRoutineRow: View {
                     Text(routine.title)
                         .strikethrough(instance.done)
                         .foregroundStyle(instance.done ? theme.quiet : theme.ink)
-                    Text(RoutineParser.label(routine.weekdays))
+                    Text(routine.ruleLabel)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(theme.quiet)
                         .padding(.horizontal, 5).padding(.vertical, 1)

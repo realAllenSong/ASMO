@@ -174,14 +174,20 @@ final class RoutineRecord {
     var endDay: String?
     var order = 0
     var createdAt = Date.now
+    /// Monthly on this day of the month (a shorter month: its last day); nil = by `weekdays`.
+    var monthDay: Int?
+
+    /// "每天", "每周一三", "每月15日".
+    var ruleLabel: String { RoutineParser.label(weekdays, monthDay: monthDay) }
 
     var weekdays: Set<Int> {
         get { Set(weekdaysRaw.compactMap { $0.wholeNumberValue }.filter { (1...7).contains($0) }) }
         set { weekdaysRaw = newValue.sorted().map(String.init).joined() }
     }
 
-    init(title: String, weekdays: Set<Int>, startMinute: Int?, endMinute: Int?, startDay: String, order: Int) {
+    init(title: String, weekdays: Set<Int>, monthDay: Int? = nil, startMinute: Int?, endMinute: Int?, startDay: String, order: Int) {
         self.title = title
+        self.monthDay = monthDay
         self.startMinute = startMinute
         self.endMinute = endMinute
         self.startDay = startDay
@@ -192,6 +198,10 @@ final class RoutineRecord {
     func applies(to day: PlanDate, calendar: Calendar) -> Bool {
         guard day.key >= startDay, endDay.map({ day.key < $0 }) ?? true,
               let date = day.dayOnly.date(in: calendar) else { return false }
+        if let monthDay {
+            let last = calendar.range(of: .day, in: .month, for: date)?.count ?? 31
+            return day.day == min(monthDay, last)
+        }
         return weekdays.contains(calendar.component(.weekday, from: date))
     }
 }

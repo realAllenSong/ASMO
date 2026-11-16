@@ -42,7 +42,7 @@ The day's page (free notes under the items), written in Markdown
 
 Routines
   asmo routines                      repeating items
-  asmo routine add TITLE [--on daily|weekdays|weekends|mon,thu] [--time HH:MM] [--end HH:MM] [--from DAY]
+  asmo routine add TITLE [--on daily|weekdays|weekends|mon,thu|monthly|monthly:15] [--time HH:MM] [--end HH:MM] [--from DAY]
   asmo routine done|skip|clear ID [--day DAY]
   asmo routine stop ID               ends it from today on
 
@@ -250,7 +250,7 @@ let tools: [Tool] = [
          required: ["day", "blocks"], request: passing("page-remove")),
     Tool(name: "routines", about: "The user's repeating items.", properties: [:], request: passing("routines")),
     Tool(name: "add_routine", about: "Add a repeating item.",
-         properties: ["title": stringType, "weekdays": described("string", "daily, weekdays, weekends, or names like mon,thu"),
+         properties: ["title": stringType, "weekdays": described("string", "daily, weekdays, weekends, names like mon,thu, monthly (on the start day) or monthly:15"),
                       "time": stringType, "end": stringType, "from": described("string", "First day; " + dayHelp)],
          required: ["title"], request: passing("routine-add")),
     Tool(name: "mark_routine", about: "Mark a routine done or skipped on one day, or clear the mark.",

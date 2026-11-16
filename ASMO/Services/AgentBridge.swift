@@ -361,9 +361,18 @@ final class AgentCommands {
     private func addRoutine(_ body: [String: Any]) throws -> [String: Any] {
         let title = (body["title"] as? String ?? "").trimmed
         guard !title.isEmpty else { throw Failure(message: "A routine needs a \"title\".") }
-        let days = try weekdays(body["weekdays"])
+        // "monthly" (on the day it starts) or "monthly:15".
+        var monthDay: Int?
+        var days = Set(1...7)
+        if let rule = (body["weekdays"] as? String)?.lowercased(), rule.hasPrefix("monthly") {
+            let from = try planDay(body["from"] ?? "today")
+            monthDay = rule.split(separator: ":").dropFirst().first.flatMap { Int($0) } ?? from.day
+            guard let day = monthDay, (1...31).contains(day) else { throw Failure(message: "monthly:N needs a day 1–31.") }
+        } else {
+            days = try weekdays(body["weekdays"])
+        }
         let start = try body["time"].flatMap(minutes), end = try body["end"].flatMap(minutes)
-        let routine = RoutineRecord(title: title, weekdays: days, startMinute: start, endMinute: start == nil ? nil : end,
+        let routine = RoutineRecord(title: title, weekdays: days, monthDay: monthDay, startMinute: start, endMinute: start == nil ? nil : end,
                                     startDay: try planDay(body["from"] ?? "today").key,
                                     order: (try routines().map(\.order).max() ?? 0) + 1)
         context.insert(routine)
@@ -378,11 +387,11 @@ final class AgentCommands {
     private func stopRoutine(_ body: [String: Any]) throws -> [String: Any] {
         let routine = try requiredRoutine(body["id"])
         let row = json(routine)
-        let saved = (id: routine.id, title: routine.title, weekdays: routine.weekdays, start: routine.startMinute, end: routine.endMinute,
+        let saved = (id: routine.id, title: routine.title, weekdays: routine.weekdays, monthDay: routine.monthDay, start: routine.startMinute, end: routine.endMinute,
                      from: routine.startDay, until: routine.endDay, order: routine.order, created: routine.createdAt)
         remember("stopped the routine 「\(routine.title)」") { [self] in
             if let existing = try routines().first(where: { $0.id == saved.id }) { existing.endDay = saved.until; return }
-            let back = RoutineRecord(title: saved.title, weekdays: saved.weekdays, startMinute: saved.start, endMinute: saved.end,
+            let back = RoutineRecord(title: saved.title, weekdays: saved.weekdays, monthDay: saved.monthDay, startMinute: saved.start, endMinute: saved.end,
                                      startDay: saved.from, order: saved.order)
             back.id = saved.id
             back.endDay = saved.until
@@ -774,8 +783,9 @@ final class AgentCommands {
 
     private func json(_ routine: RoutineRecord) -> [String: Any] {
         var row: [String: Any] = ["id": routine.id.uuidString.lowercased(), "title": routine.title,
-                                  "weekdays": routine.weekdays.sorted(), "repeats": RoutineParser.label(routine.weekdays),
+                                  "weekdays": routine.weekdays.sorted(), "repeats": routine.ruleLabel,
                                   "from": routine.startDay]
+        if let day = routine.monthDay { row["monthDay"] = day }
         if let start = routine.startMinute { row["time"] = clockText(start) }
         if let end = routine.endMinute { row["end"] = clockText(end) }
         if let until = routine.endDay { row["until"] = until }
