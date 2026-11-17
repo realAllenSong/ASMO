@@ -17,15 +17,26 @@ sleep 0.7
 sleep 4
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$app" || true
 
-snap() { script/snapshot.sh "$work/$1.png"; }
-nav() { echo "$1" > "$caches/asmo-nav.txt"; sleep "${2:-2.5}"; }
+# Each frame from the same place: today's heading at the top of the window.
+snap() { printf 'ed:scrollto:· Today' > "$caches/asmo-nav.txt"; sleep 1; script/snapshot.sh "$work/$1.png"; }
+
+# Start from the demo store's own items: what an earlier clip added is taken out first.
+for title in "Run" "Call with Li about the lease"; do
+    for id in $("$asmo" search "$title" --test | python3 -c "import json,sys; print(' '.join(t['id'] for t in json.load(sys.stdin)['tasks'] if t['title'] == sys.argv[1]))" "$title"); do
+        "$asmo" rm "$id" --test > /dev/null
+    done
+done
+for block in $("$asmo" page tomorrow --test | python3 -c "import json,sys; print(' '.join(b['id'] for b in reversed(json.load(sys.stdin)['blocks'])))"); do
+    "$asmo" page rm tomorrow "$block" --test > /dev/null
+done
+sleep 1.5
 
 snap app0
-"$asmo" add "Run" --day 2026-11-11 --time 21:00 --end 22:00 --test > /dev/null
-sleep 1; snap app1
-"$asmo" add "Call with Li about the lease" --day 2026-11-12 --time 15:00 --end 15:30 --test > /dev/null
-sleep 1; snap app2
-"$asmo" page write 2026-11-12 --test > /dev/null <<'MD'
+"$asmo" add "Run" --day today --time 21:00 --end 22:00 --test > /dev/null
+sleep 1.5; snap app1
+"$asmo" add "Call with Li about the lease" --day tomorrow --time 15:00 --end 15:30 --test > /dev/null
+sleep 1.5; snap app2
+"$asmo" page write tomorrow --test > /dev/null <<'MD'
 ## Lease questions
 
 - [ ] Is the deposit refundable?
@@ -37,9 +48,7 @@ graph LR
   Call[Call Li] --> Read[Read the draft] --> Sign((Sign))
 ```
 MD
-nav "edit:2026-11-12"
-snap app3
-nav close 1
+sleep 2.5; snap app3
 
 python3 - "$work" assets/demo.gif <<'PY'
 import subprocess, sys
@@ -60,7 +69,7 @@ prompt = ("I'm running from 9 to 10 tonight, and tomorrow at 3 I have a call wit
 steps = [
     ('asmo add "Run" --day today --time 21:00 --end 22:00', "Run · today 21:00–22:00"),
     ('asmo add "Call with Li about the lease" --day tomorrow --time 15:00 --end 15:30', "Call with Li · tomorrow 15:00"),
-    ("asmo page write tomorrow  (checklist + diagram)", "Page of Nov 12 · 4 blocks"),
+    ("asmo page write tomorrow  (checklist + diagram)", "Tomorrow's page · 3 blocks"),
 ]
 
 def wrap(text, font, width):
@@ -123,6 +132,12 @@ open(f"{work}/list.txt", "w").write("\n".join(listing))
 subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", f"{work}/list.txt",
                 "-vf", "split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
                 "-loop", "0", out], check=True)
+# The same clip as video for the website (sharper and smaller than the GIF).
+subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", f"{work}/list.txt",
+                "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-crf", "24", "-preset", "slow", "-movflags", "+faststart",
+                out.replace(".gif", ".mp4")], check=True)
 PY
 /usr/bin/pkill -f "Debug/ASMO.app" 2>/dev/null || true
-ls -la assets/demo.gif
+
+mv assets/demo.mp4 docs/assets/
+ls -la assets/demo.gif docs/assets/demo.mp4

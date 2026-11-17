@@ -76,6 +76,11 @@ script/install.sh      # 构建、替换 /Applications/ASMO.app，并装好 asmo
 
 ## 让 agent 来用
 
+<p align="center">
+  <img src="assets/demo.gif" width="800" alt="左边是和 agent 的对话；右边逐日的文档随着 agent 添加跑步、电话和一页问题而更新" />
+  <br/><sub>左边的对话面板是为这段动图绘制的；右边的 app 画面是同样的命令执行时逐日的真实快照，内容为虚构。</sub>
+</p>
+
 安装之后，在任意目录开一个新的 Claude Code 或 Codex 会话，直接说：
 
 > 今晚九点到十点我要跑步，明天下午三点和小李通电话聊租约。把要问的租约问题写到明天的页面上，做成勾选清单。

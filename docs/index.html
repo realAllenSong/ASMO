@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#F7F5F0" />
   <meta name="color-scheme" content="light" />
 
-  <title>ASMO · 逐日 — the calendar your coding agent can use</title>
-  <meta name="description" content="ASMO (逐日) is a free, open-source calendar and to-do list for macOS that Claude Code, Codex and other agents can read and change through a command line and an MCP server. No account, no cloud, no model inside the app." />
+  <title>ASMO · 逐日 — the planner your coding agent can use</title>
+  <meta name="description" content="ASMO (逐日) is a free, open-source planner for macOS that you write like a document and that Claude Code, Codex and other agents can read and change through a command line and an MCP server. To-dos sync both ways with Apple Calendar and Reminders. No account, no server of its own, no model inside the app." />
   <link rel="canonical" href="https://realallensong.github.io/ASMO/" />
   <meta name="robots" content="index, follow" />
 
@@ -15,14 +15,14 @@
   <meta property="og:url" content="https://realallensong.github.io/ASMO/" />
   <meta property="og:locale" content="en_US" />
   <meta property="og:locale:alternate" content="zh_CN" />
-  <meta property="og:title" content="ASMO · 逐日 — the calendar your coding agent can use" />
-  <meta property="og:description" content="Tell Claude Code or Codex what your day looks like, and it shows up in the app as you talk. Free and open source for macOS." />
+  <meta property="og:title" content="ASMO · 逐日 — the planner your coding agent can use" />
+  <meta property="og:description" content="Write your days like a document, or tell Claude Code or Codex. To-dos land in Apple Calendar and Reminders, and on your phone. Free and open source for macOS." />
   <meta property="og:image" content="https://realallensong.github.io/ASMO/assets/og.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="ASMO · 逐日 — the calendar your coding agent can use" />
-  <meta name="twitter:description" content="A free, open-source macOS calendar and to-do list with a CLI and an MCP server for agents." />
+  <meta name="twitter:title" content="ASMO · 逐日 — the planner your coding agent can use" />
+  <meta name="twitter:description" content="A free, open-source macOS planner written like a document, synced with Apple Calendar and Reminders, with a CLI and an MCP server for agents." />
   <meta name="twitter:image" content="https://realallensong.github.io/ASMO/assets/og.png" />
 
   <link rel="icon" type="image/png" href="assets/icon.png" />
@@ -67,7 +67,7 @@
     body { background: var(--bg); color: var(--ink); font: 400 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: clip; }
     ::selection { background: var(--accent-soft); }
     a { color: inherit; }
-    img { max-width: 100%; height: auto; display: block; }
+    img, video { max-width: 100%; height: auto; display: block; }
     .hero-row > *, .split > *, .grid > *, .close-row > * { min-width: 0; }
     pre { max-width: 100%; }
     button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
@@ -166,7 +166,7 @@
       <nav class="links" aria-label="Sections">
         <a href="#agents" data-i18n="nav.agents">Agents</a>
         <a href="#pages" data-i18n="nav.pages">Pages</a>
-        <a href="#calendar" data-i18n="nav.calendar">Calendar</a>
+        <a href="#calendar" data-i18n="nav.calendar">By hand</a>
         <a href="#install" data-i18n="nav.install">Install</a>
         <a href="#faq" data-i18n="nav.faq">FAQ</a>
       </nav>
@@ -187,7 +187,7 @@
       <p class="eyebrow"><i aria-hidden="true"></i><span data-i18n="hero.eyebrow">Free · Open source · For Claude Code, Codex and MCP</span></p>
       <h1><span data-i18n="hero.h1a">Tell your agent your day.</span><em data-i18n="hero.h1b">It lands in your calendar.</em></h1>
       <div class="hero-row">
-        <p class="lede" data-i18n="hero.lede">ASMO is a quiet calendar and to-do list for macOS. Claude Code, Codex or any MCP app can read your days and change them: add and move items, check things off, and write notes with pictures, tables and diagrams. The app runs no model of its own.</p>
+        <p class="lede" data-i18n="hero.lede">ASMO is a planner for macOS that you write like a document: one long page of days, where finished lines become to-dos. They go to Apple Calendar and Reminders, and from there to your phone. Claude Code, Codex or any MCP app can read your days and change them too. The app runs no model of its own.</p>
         <div class="cta">
           <div class="cta-btns">
             <a class="btn btn-ink" href="https://github.com/realAllenSong/ASMO/releases/latest" rel="noopener" data-i18n="hero.cta1">Download for macOS</a>
@@ -197,7 +197,7 @@
         </div>
       </div>
       <figure>
-        <img class="shot" src="assets/demo.gif" width="1600" height="698" alt="An agent conversation on the left; on the right ASMO's calendar updates as the agent adds a run, a call and a page of questions" />
+        <video class="shot" src="assets/demo.mp4" width="1600" height="698" autoplay muted loop playsinline aria-label="An agent conversation on the left; on the right ASMO's document updates as the agent adds a run, a call and a page of questions"></video>
         <figcaption data-i18n="hero.cap">The conversation panel is drawn for this clip. The app frames are real snapshots of ASMO taken as the same commands ran, with made-up items.</figcaption>
       </figure>
     </section>
@@ -232,7 +232,7 @@
             <li data-i18n="pg.l3"><b>Pictures by path or link.</b> Screenshots, photos and mock-ups are scaled to the page.</li>
             <li data-i18n="pg.l4"><b>Edit one block at a time.</b> Agents read the page as blocks b1, b2… and replace or remove one without touching the rest.</li>
           </ul>
-          <img class="shot" src="assets/day-page.png" width="1600" height="900" alt="A day page with timed items and subtasks, a checklist, a flowchart and a table" style="margin-top:0" />
+          <img class="shot" src="assets/document.png" width="1600" height="1028" alt="ASMO's document: today's items with times and repeat tags, then a page of notes with a checklist and a diagram" style="margin-top:0" />
         </div>
 <pre><span class="k">asmo</span> page write today &lt;&lt;'MD'
 ## Release plan
@@ -248,15 +248,15 @@ MD</pre>
     <section class="sec" id="calendar">
       <div class="wrap">
         <p class="kicker" data-i18n="ca.kicker">By hand, too</p>
-        <h2 data-i18n="ca.h2">A calendar that stays out of the way.</h2>
-        <p data-i18n="ca.p">Without an agent, ASMO is a month calendar with a page for every day.</p>
+        <h2 data-i18n="ca.h2">Write your days like a document.</h2>
+        <p data-i18n="ca.p">Without an agent, ASMO is one long page of days, today first. A line with a bullet is a to-do, a line with a time is on your schedule, everything else is notes.</p>
         <div class="grid">
-          <div class="card"><h3 data-i18n="ca.c1h">Month at a glance</h3><p data-i18n="ca.c1p">Every day lists its items in time order; finished ones are struck through. Drag an item to another day to move it.</p></div>
-          <div class="card"><h3 data-i18n="ca.c2h">Subtasks and routines</h3><p data-i18n="ca.c2p">Nest items three levels deep. Routines repeat every day, on weekdays or on the days you pick, and can be skipped for one day.</p></div>
-          <div class="card"><h3 data-i18n="ca.c3h">Dates that matter</h3><p data-i18n="ca.c3p">Birthdays, anniversaries and holidays return every year, in the Gregorian or the Chinese lunar calendar.</p></div>
-          <div class="card"><h3 data-i18n="ca.c4h">Apple Calendar beside it</h3><p data-i18n="ca.c4p">Optionally show your Apple Calendar events next to your items, read through macOS with your permission.</p></div>
+          <div class="card"><h3 data-i18n="ca.c1h">Sorted when you pause</h3><p data-i18n="ca.c1p">Finished lines become items, with the time read from your words. "10" written at 7 pm means 10 pm. Strike a line or click its bullet to check it off.</p></div>
+          <div class="card"><h3 data-i18n="ca.c4h">Calendar and Reminders, both ways</h3><p data-i18n="ca.c4p">From today on, timed items become events and the rest become reminders, in iCloud and on your phone. Changes made there come back within seconds, new ones included.</p></div>
+          <div class="card"><h3 data-i18n="ca.c2h">Repeats with one button</h3><p data-i18n="ca.c2p">Daily, weekdays, weekly on that day or monthly on that date, with no syntax to learn. Subtasks nest three levels deep.</p></div>
+          <div class="card"><h3 data-i18n="ca.c3h">Months in a sidebar</h3><p data-i18n="ca.c3p">Jump to any month from the contents, and back with This month. Birthdays and holidays return every year, Gregorian or lunar.</p></div>
           <div class="card"><h3 data-i18n="ca.c5h">English and Chinese</h3><p data-i18n="ca.c5p">The interface follows your Mac, or pick a language in Settings. What you write stays exactly as you wrote it.</p></div>
-          <div class="card"><h3 data-i18n="ca.c6h">Private by default</h3><p data-i18n="ca.c6p">Your data is a local file on your Mac. No account, no sync service, nothing uploaded.</p></div>
+          <div class="card"><h3 data-i18n="ca.c6h">Yours</h3><p data-i18n="ca.c6p">Your data is a local file on your Mac. No account and no server of ASMO's own; your other devices are reached through your own iCloud.</p></div>
         </div>
       </div>
     </section>
@@ -279,11 +279,11 @@ MD</pre>
         <h2 data-i18n="fq.h2">Plain answers.</h2>
         <div class="faq">
           <details><summary data-i18n="fq.q1">Is it free?</summary><p data-i18n="fq.a1">Yes. ASMO is MIT licensed, with no account, subscription or usage limit. The source is on GitHub.</p></details>
-          <details><summary data-i18n="fq.q2">Does the app use AI?</summary><p data-i18n="fq.a2">No model runs inside ASMO. The agent you already use does the understanding; ASMO stores exactly what it is told. Text you type by hand is turned into dated items by simple date-and-time rules.</p></details>
+          <details><summary data-i18n="fq.q2">Does the app use AI?</summary><p data-i18n="fq.a2">No model runs inside ASMO. The agent you already use does the understanding; ASMO stores exactly what it is told. Lines you write by hand are turned into dated items by date-and-time rules.</p></details>
           <details><summary data-i18n="fq.q3">What does my agent send, and to whom?</summary><p data-i18n="fq.a3">ASMO only receives commands on your Mac. What your agent sends to its own provider is between you and that agent.</p></details>
           <details><summary data-i18n="fq.q4">Can I undo what an agent did?</summary><p data-i18n="fq.a4">Yes. asmo undo (or the undo MCP tool) takes back the last change, and the ones before it, until the app is restarted.</p></details>
           <details><summary data-i18n="fq.q6">How does it update?</summary><p data-i18n="fq.a6">ASMO checks GitHub Releases after it opens and once a day. When a new version is out it asks; Update Now downloads it, checks the signature, replaces the app and reopens it. Your data is not touched.</p></details>
-          <details><summary data-i18n="fq.q5">Which Macs are supported?</summary><p data-i18n="fq.a5">Apple silicon Macs with macOS 15 or later. An iPhone app builds from the same source, but it doesn't sync with the Mac yet.</p></details>
+          <details><summary data-i18n="fq.q5">Which Macs are supported?</summary><p data-i18n="fq.a5">Apple silicon Macs with macOS 15 or later. On the iPhone, your items are in Calendar and Reminders; an iPhone app builds from the same source but doesn't sync directly yet.</p></details>
         </div>
       </div>
     </section>
@@ -293,7 +293,7 @@ MD</pre>
     <div class="wrap">
       <div class="close-row">
         <div>
-          <h2 data-i18n="cta.h">Give your agent a calendar.</h2>
+          <h2 data-i18n="cta.h">Write your day. Your agent can too.</h2>
           <p class="fine" data-i18n="cta.fine">Apple silicon, macOS 15 or later. MIT licence. Downloads come from GitHub Releases.</p>
         </div>
         <div class="cta-btns">
@@ -317,13 +317,13 @@ MD</pre>
     (function () {
       "use strict";
       var ZH = {
-        "nav.agents": "Agent", "nav.pages": "页面", "nav.calendar": "日历", "nav.install": "安装", "nav.faq": "常见问题", "nav.dl": "下载",
+        "nav.agents": "Agent", "nav.pages": "页面", "nav.calendar": "手写", "nav.install": "安装", "nav.faq": "常见问题", "nav.dl": "下载",
         "hero.eyebrow": "免费 · 开源 · 适用于 Claude Code、Codex 和 MCP",
         "hero.h1a": "把今天告诉你的 agent，", "hero.h1b": "它就落进你的日历。",
-        "hero.lede": "逐日是一个安静的 macOS 日历和待办。Claude Code、Codex 或任何 MCP 应用都能读取和修改你的每一天：添加和移动事项、打勾，还能写带图片、表格和图表的笔记。app 本身不运行任何模型。",
+        "hero.lede": "逐日是一个像写文档一样用的 macOS 计划本：每一天排在同一页长文档里，写完的行变成待办，自动进 Apple 日历和提醒事项，手机上也能看到。Claude Code、Codex 或任何 MCP 应用也能读取和修改你的每一天。app 本身不运行任何模型。",
         "hero.cta1": "下载 macOS 版", "hero.cta2": "查看源码",
         "hero.fine": "免费，MIT 协议。需要 Apple 芯片的 Mac，macOS 15 或更高版本。已签名并经过 Apple 公证。",
-        "hero.cap": "左边的对话面板是为这段动图绘制的。右边的 app 画面是同样的命令执行时 逐日 的真实快照，内容为虚构。",
+        "hero.cap": "左边的对话面板是为这段视频绘制的。右边的 app 画面是同样的命令执行时逐日的真实快照，内容为虚构。",
         "ag.kicker": "给 agent 用", "ag.h2": "思考交给 agent，逐日负责记住每一天。",
         "ag.p": "coding agent 本来就懂你的意思。逐日给它一个落地的地方：有 shell 的 agent 用命令行，没有 shell 的应用用 MCP 服务。日期和时间按字段传入，不靠猜；每一次修改都能撤销。",
         "ag.c1h": "Claude Code 和 Codex", "ag.c1p": "一个 skill 教会它们使用 asmo 命令。在任意目录开一个会话，说出你今天的安排即可。",
@@ -334,25 +334,25 @@ MD</pre>
         "pg.l2": "<b>画图不需要模型。</b>mermaid 代码块由 app 自带的 mermaid 绘制，图表源码保存在图片里。",
         "pg.l3": "<b>图片用路径或链接。</b>截图、照片和设计稿会按页面宽度缩放。",
         "pg.l4": "<b>一次改一块。</b>agent 把页面读成 b1、b2……这样的块，可以只替换或删除其中一块。",
-        "ca.kicker": "也能手动用", "ca.h2": "一个不打扰你的日历。", "ca.p": "不用 agent 时，逐日就是一个月历，每天有一页。",
-        "ca.c1h": "一眼看完一个月", "ca.c1p": "每天按时间顺序列出事项，完成的划掉。把事项拖到另一天就能改期。",
-        "ca.c2h": "子任务和例行事项", "ca.c2p": "事项最多嵌套三层。例行事项可以每天、工作日或指定星期重复，也可以单独跳过一天。",
-        "ca.c3h": "重要的日子", "ca.c3p": "生日、纪念日和节日每年自动出现，支持公历和农历。",
-        "ca.c4h": "旁边放着 Apple 日历", "ca.c4p": "可以选择把 Apple 日历的日程显示在事项旁边，经你授权，通过 macOS 读取。",
+        "ca.kicker": "也能手写", "ca.h2": "像写文档一样写每一天。", "ca.p": "不用 agent 时，逐日就是一页长长的文档，今天在最上面。带圆点的一行是待办，带时间的一行进日程，其余都是笔记。",
+        "ca.c1h": "停笔就整理", "ca.c1p": "写完的行变成事项，时间从字里读出来。晚上 7 点写「10 点」就是晚上 10 点。划掉一行或点一下圆点就算完成。",
+        "ca.c2h": "一个按钮设重复", "ca.c2p": "每天、工作日、每周这一天或每月这一号，不用学任何语法。子任务最多嵌套三层。",
+        "ca.c3h": "侧边栏按月跳转", "ca.c3p": "从目录跳到任何一个月，点「本月」回来。生日和节日每年自动出现，支持公历和农历。",
+        "ca.c4h": "日历和提醒事项，双向同步", "ca.c4p": "从今天起，有时间的事项是日历日程，其余是提醒事项，通过 iCloud 到你的手机。在那边的修改几秒内就回来，新建的也会。",
         "ca.c5h": "中文和英文", "ca.c5p": "界面跟随系统，也可以在设置里选语言。你写的内容保持原样，不会被翻译。",
-        "ca.c6h": "默认私密", "ca.c6p": "数据是你 Mac 上的一个本地文件。没有账号，没有同步服务，不上传任何内容。",
+        "ca.c6h": "数据是你的", "ca.c6p": "数据是你 Mac 上的一个本地文件。没有账号，逐日没有自己的服务器；到其他设备走的是你自己的 iCloud。",
         "in.kicker": "安装", "in.h2": "下载、打开，然后直接说。",
         "in.s1h": "下载", "in.s1p": "从 GitHub Releases 下载 zip，解压后把 逐日 拖进「应用程序」。已经过 Apple 签名和公证。",
         "in.s2h": "打开它", "in.s2p": "逐日会自己连好这台 Mac 上的 Claude Code、Codex 和 Claude 桌面版。什么都不用输入；设置里能看到连接状态。",
         "in.s3h": "跟 agent 说", "in.s3p": "开一个新会话，说出你今天的安排。新版本点一下就能装：逐日会自己检查更新。",
         "fq.kicker": "常见问题", "fq.h2": "直接回答。",
         "fq.q1": "免费吗？", "fq.a1": "免费。逐日采用 MIT 协议，没有账号、订阅或使用限制，源码在 GitHub 上。",
-        "fq.q2": "app 用 AI 吗？", "fq.a2": "逐日内部不运行任何模型。理解由你已经在用的 agent 完成，逐日只按收到的内容原样保存。你手动输入的文字，会按简单的日期和时间规则变成带日期的事项。",
+        "fq.q2": "app 用 AI 吗？", "fq.a2": "逐日内部不运行任何模型。理解由你已经在用的 agent 完成，逐日只按收到的内容原样保存。你手写的行，会按日期和时间规则变成带日期的事项。",
         "fq.q3": "我的 agent 会把什么发给谁？", "fq.a3": "逐日只在你的 Mac 上接收命令。你的 agent 把什么发给它的服务商，是你和那个 agent 之间的事。",
         "fq.q4": "agent 做的修改能撤销吗？", "fq.a4": "能。asmo undo（或 MCP 里的 undo 工具）撤回上一次修改，可以连续撤回，直到 app 重启为止。",
         "fq.q6": "怎么更新？", "fq.a6": "逐日打开后和之后每天会检查 GitHub Releases。有新版本时会询问你；立即更新会下载新版本、检查签名、替换 app 并重新打开。你的数据不受影响。",
-        "fq.q5": "支持哪些 Mac？", "fq.a5": "macOS 15 及以上、Apple 芯片的 Mac。iPhone 版可以从同一份源码构建，但目前还不和 Mac 同步。",
-        "cta.h": "给你的 agent 一个日历。", "cta.fine": "Apple 芯片，macOS 15 或更高版本。MIT 协议。下载来自 GitHub Releases。", "cta.src": "阅读源码",
+        "fq.q5": "支持哪些 Mac？", "fq.a5": "macOS 15 及以上、Apple 芯片的 Mac。在 iPhone 上，你的事项在日历和提醒事项里；iPhone 版可以从同一份源码构建，但还不能直接同步。",
+        "cta.h": "写下你的一天，agent 也能帮你写。", "cta.fine": "Apple 芯片，macOS 15 或更高版本。MIT 协议。下载来自 GitHub Releases。", "cta.src": "阅读源码",
         "foot.rel": "版本发布", "foot.issues": "报告问题", "foot.tt": "作者的另一个项目：ThunderTalk"
       };
       var EN = {};

@@ -76,6 +76,11 @@ script/install.sh      # builds, replaces /Applications/ASMO.app, installs asmo,
 
 ## Use it from an agent
 
+<p align="center">
+  <img src="assets/demo.gif" width="800" alt="An agent conversation on the left; on the right ASMO's document updates as the agent adds a run, a call and a page of questions" />
+  <br/><sub>The conversation panel is drawn for this clip; the app frames are real snapshots of ASMO taken as the same commands ran, with made-up items.</sub>
+</p>
+
 After installing, open a new Claude Code or Codex session anywhere and say what you want:
 
 > I'm running from 9 to 10 tonight, and tomorrow at 3 I have a call with Li about the lease. Put the lease questions on tomorrow's page as a checklist.
