@@ -48,7 +48,13 @@ final class CalendarMirror {
             }
         })
         schedule(after: 3)
+        // A change on the phone reaches this Mac through iCloud and is announced; a check every two minutes
+        // catches one that wasn't (the Mac asleep, the notice dropped).
+        timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { _ in
+            MainActor.assumeIsolated { CalendarMirror.shared.schedule(after: 0) }
+        }
     }
+    private var timer: Timer?
 
     func schedule(after delay: TimeInterval) {
         guard enabled else { return }
@@ -102,6 +108,11 @@ final class CalendarMirror {
             return date >= from && date < until
         }
 
+        // Made there, in the 逐日 calendar or list (on the phone, by Siri): it becomes an item here first.
+        var records = loadRecords()
+        let adopted = try await adopt(calendar: calendar, list: list, from: from, until: until, today: today, cal: cal,
+                                      context: context, records: &records)
+
         // 逐日's side: top-level items with a day; their sub-items go in the notes.
         let tasks = try context.fetch(FetchDescriptor<TaskRecord>())
         let children = Dictionary(grouping: tasks.filter { $0.parentID != nil }) { $0.parentID! }
@@ -139,9 +150,8 @@ final class CalendarMirror {
             objects[id] = reminder
         }
 
-        var records = loadRecords()
         let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records)
-        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0]
+        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0, "adopted": adopted]
         var deletedAny = false
         var pulledAny = false
         for action in actions {
@@ -205,6 +215,44 @@ final class CalendarMirror {
                 "events": wanted.values.filter { $0.kind == .event }.count,
                 "reminders": wanted.values.filter { $0.kind == .reminder }.count]
             .merging(counts.mapValues { $0 as Any }) { $1 }
+    }
+
+    /// Reminders and events put straight into the 逐日 list or calendar (no 逐日 marker yet) become items: a
+    /// reminder on its due day (no day: today, and it gets today as its day there too), an event at its time.
+    /// Repeating events stay Calendar's own.
+    private func adopt(calendar: EKCalendar, list: EKCalendar, from: Date, until: Date, today: PlanDate, cal: Calendar,
+                       context: ModelContext, records: inout [UUID: MirrorRecord]) async throws -> Int {
+        var made: [(EKCalendarItem, MirrorItem)] = []
+        for reminder in await reminders(in: list) where Self.marker(reminder) == nil && !reminder.isCompleted {
+            if (reminder.title ?? "").trimmed.isEmpty { continue }
+            if reminder.dueDateComponents == nil && reminder.startDateComponents == nil {
+                let due = DateComponents(calendar: cal, year: today.year, month: today.month, day: today.day)
+                reminder.startDateComponents = due
+                reminder.dueDateComponents = due
+            }
+            guard let item = Self.item(reminder) else { continue }
+            made.append((reminder, item))
+        }
+        let events = store.events(matching: store.predicateForEvents(withStart: from, end: until, calendars: [calendar]))
+        for event in events where Self.marker(event) == nil && !event.hasRecurrenceRules {
+            if (event.title ?? "").trimmed.isEmpty { continue }
+            made.append((event, Self.item(event, calendar: cal)))
+        }
+        guard !made.isEmpty else { return 0 }
+        for (object, item) in made {
+            let task = TaskRecord(title: item.plainTitle.trimmed, note: item.notes.trimmed,
+                                  schedule: PlanDate(year: item.year, month: item.month, day: item.day))
+            apply(item, to: task)
+            context.insert(task)
+            object.url = URL(string: "asmo://mirror/\(task.id.uuidString)")
+            try save(object)
+            records[task.id] = MirrorRecord(item: item, identifier: object.calendarItemIdentifier)
+        }
+        quietUntil = .now.addingTimeInterval(3)
+        try store.commit()
+        try context.save()
+        saveRecords(records)
+        return made.count
     }
 
     // MARK: EventKit

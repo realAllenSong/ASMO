@@ -2926,6 +2926,8 @@ struct PlannerView: View {
         var marks: [String: RoutineMark] = [:]
         var notes: [String: DayNote] = [:]
         var pages: [String: Data] = [:]
+        /// Lines written on a page but not organized yet (they stay to-dos-in-waiting when the page is drawn again).
+        var pending: [String: [String]] = [:]
         var reminders: [PlanDate: [SystemTask]] = [:]
         var promoted = Set<String>()
         var edits: [String: String] = [:]
@@ -2953,6 +2955,7 @@ struct PlannerView: View {
             pages = (try? context.fetch(FetchDescriptor<DayPage>(predicate: #Predicate { keys.contains($0.dayKey) }))) ?? []
         }
         index.pages = Dictionary(pages.compactMap { page in page.rtfd.map { (page.dayKey, $0) } }, uniquingKeysWith: { first, _ in first })
+        for page in pages { if let raw = page.pendingRaw { index.pending[page.dayKey] = raw.components(separatedBy: "\n") } }
         for reminder in system.reminders where reminder.asmoID == nil {
             if let day = reminder.schedule?.dayOnly { index.reminders[day, default: []].append(reminder) }
         }
@@ -3011,7 +3014,7 @@ struct PlannerView: View {
         }
         guard day.day != nil else {
             top.sort { ($0.minute ?? 10_000, $0.order) < ($1.minute ?? 10_000, $1.order) }
-            return DocDay(day: day, heading: heading, isToday: false, lines: top.flatMap(\.lines), notes: index.pages[day.key])
+            return DocDay(day: day, heading: heading, isToday: false, lines: top.flatMap(\.lines), notes: index.pages[day.key], pending: index.pending[day.key] ?? [])
         }
         var occasionTitles = Set<String>()
         // Birthdays and anniversaries from now on (on days of the old history they'd only be noise, and lunar
@@ -3068,7 +3071,7 @@ struct PlannerView: View {
                 }
             }
         }
-        return DocDay(day: day, heading: heading, isToday: day == today, lines: lines, notes: index.pages[day.key])
+        return DocDay(day: day, heading: heading, isToday: day == today, lines: lines, notes: index.pages[day.key], pending: index.pending[day.key] ?? [])
     }
 
     private var documentActions: DocActions {

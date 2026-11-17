@@ -53,7 +53,8 @@ Important dates (birthdays, anniversaries, holidays; every year)
 
   asmo undo                          take back the last change made with asmo (repeat for earlier ones)
   asmo mirror [on|off]               keep Apple Calendar (timed items) and Reminders (day items) in step
-                                     with 逐日 now, both ways, and report what changed; on/off turns it on or off
+                                     with 逐日 now, both ways (things added to the 逐日 list or calendar there
+                                     come in as items), and report what changed; on/off turns it on or off
   asmo open                          bring the app's window to the front
   asmo ping                          is the app there
   asmo mcp                           run as an MCP server on stdin/stdout (for apps without a shell)

@@ -38,6 +38,8 @@ struct DocDay: Equatable {
     var lines: [DocLine]
     /// Free paragraphs (notes) written in this day, kept as rich text.
     var notes: Data?
+    /// Lines of `notes` written but not organized yet: drawn as writing waiting to be organized, not as notes.
+    var pending: [String] = []
     var showsHeading = true
 }
 
@@ -718,14 +720,23 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             self.pendingSync?.cancel()
             self.syncEdits()
         }
-        for name in [NSApplication.willResignActiveNotification, NSApplication.willTerminateNotification] {
-            leaving.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.saveNow()
-            })
-        }
+        // Switching to another app (Reminders, Calendar, the phone's mirror): what was written becomes items now,
+        // the line being written included, so it reaches Calendar and Reminders without waiting.
+        leaving.append(NotificationCenter.default.addObserver(forName: NSApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if self.view?.hasMarkedText() == true { self.saveNow() } else { self.organize(includingCurrent: true) }
+            }
+        })
+        // Quitting: saved as is; the lines not organized yet are kept as such and organized on the next launch.
+        leaving.append(NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveNow() }
+        })
     }
 
     private var leaving: [NSObjectProtocol] = []
+    /// The page just drawn had lines still waiting to be organized.
+    private var restoredPending = false
 
     deinit {
         if let agentWrites { NotificationCenter.default.removeObserver(agentWrites) }
@@ -849,6 +860,23 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
                 }
                 if !note.string.hasSuffix("\n") { note.append(NSAttributedString(string: "\n", attributes: bodyAttributes)) }
                 note.addAttribute(.asmoNote, value: true, range: NSRange(location: 0, length: note.length))
+                // Lines saved before they were organized (the app was left or redrawn first) are still to be
+                // organized, not notes: otherwise they never become items (or reach Calendar and Reminders).
+                if !day.pending.isEmpty {
+                    var waiting = day.pending.map { $0.trimmed }
+                    let string = note.string as NSString
+                    var location = 0
+                    while location < string.length {
+                        let range = string.paragraphRange(for: NSRange(location: location, length: 0))
+                        location = NSMaxRange(range)
+                        let line = Self.stripMarker(string.substring(with: range).trimmed)
+                        if let hit = waiting.firstIndex(of: line), !line.isEmpty {
+                            waiting.remove(at: hit)
+                            note.removeAttribute(.asmoNote, range: range)
+                            restoredPending = true
+                        }
+                    }
+                }
                 text.append(note)
             }
             // One empty line under each day to start writing.
@@ -859,6 +887,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         organizeUndoArmed = false
         resetUndo()
         markSynced()
+        if restoredPending {
+            restoredPending = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.organize(includingCurrent: false) }
+        }
         let focus = parent.autofocus
         #if DEBUG
         if let opened = PerfLog.opened {
