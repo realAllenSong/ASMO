@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <img src="assets/document.png" width="800" alt="ASMO's document: today's items with times and repeat tags, a finished one struck through, then a page of notes with a checklist and a diagram, and the next days below; a month contents sidebar on the left" />
-  <br/><sub>The document, with made-up items.</sub>
+  <img src="assets/demo.gif" width="800" alt="An agent conversation on the left; on the right ASMO's document updates as the agent adds a run, a call and a page of questions" />
+  <br/><sub>The conversation panel is drawn for this clip; the app frames are real snapshots of ASMO taken as the same commands ran, with made-up items.</sub>
 </p>
 
 ---
@@ -32,6 +32,11 @@ ASMO is one long document of your days, like a page in a docs app. Each day has 
 Your items are kept in Apple Calendar (the ones with a time) and Reminders (the rest), in a calendar and a list named 逐日. That is how they reach your iPhone, watch and anything else signed in to iCloud. It works both ways: check something off, move it, delete it or add one on the phone, and the document follows within seconds.
 
 The `asmo` command is the other way in. Any agent that can run a shell command (Claude Code, Codex) can read your days and change them: add and move items, check things off, and write a day's page in Markdown with pictures, tables and diagrams. Apps without a shell, such as the Claude desktop app, get the same thing through an MCP server. The app itself runs no language model: the agent you already use does the thinking, and ASMO stores exactly what it is told.
+
+<p align="center">
+  <img src="assets/document.png" width="800" alt="ASMO's document: today's items with times and repeat tags, a finished one struck through, then a page of notes with a checklist and a diagram, and the next days below; a month contents sidebar on the left" />
+  <br/><sub>The document, with made-up items.</sub>
+</p>
 
 ## Features
 
@@ -75,11 +80,6 @@ script/install.sh      # builds, replaces /Applications/ASMO.app, installs asmo,
 `script/release.sh` builds the signed, notarized zip (it needs a Developer ID certificate and a notarytool profile). An iPhone app builds from the same source (`script/install-iphone.sh`, with your own Apple developer team), but the agent features are Mac-only for now. Until the phone app syncs directly, use Calendar and Reminders on the phone.
 
 ## Use it from an agent
-
-<p align="center">
-  <img src="assets/demo.gif" width="800" alt="An agent conversation on the left; on the right ASMO's document updates as the agent adds a run, a call and a page of questions" />
-  <br/><sub>The conversation panel is drawn for this clip; the app frames are real snapshots of ASMO taken as the same commands ran, with made-up items.</sub>
-</p>
 
 After installing, open a new Claude Code or Codex session anywhere and say what you want:
 

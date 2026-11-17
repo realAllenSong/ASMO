@@ -21,8 +21,8 @@
 </p>
 
 <p align="center">
-  <img src="assets/document-zh.png" width="800" alt="逐日的文档：今天带时间和重复标签的事项、一条划掉的已完成事项，下面是含勾选清单和流程图的笔记，再往下是之后几天；左边是按月份的目录" />
-  <br/><sub>文档界面，内容是虚构的。</sub>
+  <img src="assets/demo.gif" width="800" alt="左边是和 agent 的对话；右边逐日的文档随着 agent 添加跑步、电话和一页问题而更新" />
+  <br/><sub>左边的对话面板是为这段动图绘制的；右边的 app 画面是同样的命令执行时逐日的真实快照，内容为虚构。</sub>
 </p>
 
 ---
@@ -32,6 +32,11 @@
 事项会放进 Apple 日历（有时间的）和提醒事项（其余的），在一个叫「逐日」的日历和列表里，再通过 iCloud 到你的 iPhone、手表和其他设备。同步是双向的：在手机上打勾、改时间、删除或新建，几秒内文档就跟着变。
 
 `asmo` 命令是另一条路。任何能运行 shell 命令的 agent（Claude Code、Codex）都可以读取和修改你的每一天：添加和移动事项、打勾，用 Markdown 写当天的页面，包括图片、表格和图表。没有 shell 的应用（比如 Claude 桌面版）通过 MCP 服务获得同样的能力。app 本身不运行任何语言模型：思考由你已经在用的 agent 完成，逐日只按收到的内容原样保存。
+
+<p align="center">
+  <img src="assets/document-zh.png" width="800" alt="逐日的文档：今天带时间和重复标签的事项、一条划掉的已完成事项，下面是含勾选清单和流程图的笔记，再往下是之后几天；左边是按月份的目录" />
+  <br/><sub>文档界面，内容是虚构的。</sub>
+</p>
 
 ## 功能
 
@@ -75,11 +80,6 @@ script/install.sh      # 构建、替换 /Applications/ASMO.app，并装好 asmo
 `script/release.sh` 构建签名并公证的 zip（需要 Developer ID 证书和 notarytool 配置）。iPhone 版可以从同一份源码构建（`script/install-iphone.sh`，需要你自己的 Apple 开发者团队），但 agent 功能目前只在 Mac 上。在手机 app 能直接同步之前，手机上请用日历和提醒事项。
 
 ## 让 agent 来用
-
-<p align="center">
-  <img src="assets/demo.gif" width="800" alt="左边是和 agent 的对话；右边逐日的文档随着 agent 添加跑步、电话和一页问题而更新" />
-  <br/><sub>左边的对话面板是为这段动图绘制的；右边的 app 画面是同样的命令执行时逐日的真实快照，内容为虚构。</sub>
-</p>
 
 安装之后，在任意目录开一个新的 Claude Code 或 Codex 会话，直接说：
 
