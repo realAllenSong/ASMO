@@ -5114,6 +5114,18 @@ struct PaperContentsSidebar: View {
     let theme: PlannerTheme
     let thisYear: Int
     let today: PlanDate
+
+    /// "11月" / "25年11月" in Chinese; "November" / "Nov 2025" in English.
+    static func label(_ month: PlanDate, thisYear: Int) -> String {
+        guard Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true else {
+            return month.year == thisYear ? "\(month.month)月" : "\(month.year % 100)年\(month.month)月"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        guard (1...12).contains(month.month) else { return "\(month.month)" }
+        return month.year == thisYear ? formatter.monthSymbols[month.month - 1]
+            : "\(formatter.shortMonthSymbols[month.month - 1]) \(month.year)"
+    }
     let reduceMotion: Bool
     let pick: (PlanDate) -> Void
     let close: () -> Void
@@ -5137,7 +5149,7 @@ struct PaperContentsSidebar: View {
                             let month = PlanDate(year: first.year, month: first.month)
                             let current = (model.visible ?? today) == month
                             Button { pick(first) } label: {
-                                Text(first.year == thisYear ? "\(first.month)月" : "\(first.year % 100)年\(first.month)月")
+                                Text(Self.label(first, thisYear: thisYear))
                                     .font(.system(size: 13, weight: current ? .semibold : .regular))
                                     .foregroundStyle(current ? theme.accent : theme.ink.opacity(0.62))
                                     .frame(maxWidth: .infinity, alignment: .leading)

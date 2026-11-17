@@ -5,9 +5,9 @@
 <h1 align="center">ASMO · 逐日</h1>
 
 <p align="center">
-  A calendar and to-do list for macOS that your coding agent can use.<br/>
-  Tell Claude Code or Codex what your day looks like, and it shows up in the app as you talk.<br/>
-  Free and open source. No account, no cloud, no model inside the app.
+  A planner for macOS written like a document, that your coding agent can use.<br/>
+  Write your days in one long page; to-dos go to Apple Calendar and Reminders, and from there to your phone.<br/>
+  Free and open source. No account, no server of its own, no model inside the app.
 </p>
 
 <p align="center">
@@ -21,39 +21,33 @@
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" width="800" alt="An agent conversation on the left; on the right ASMO's calendar updates as the agent adds a run, a call and a page of questions" />
-  <br/><sub>The conversation panel is drawn for this clip; the app frames are real snapshots of ASMO taken as the same commands ran, with made-up items.</sub>
+  <img src="assets/document.png" width="800" alt="ASMO's document: today's items with times and repeat tags, a finished one struck through, then a page of notes with a checklist and a diagram, and the next days below; a month contents sidebar on the left" />
+  <br/><sub>The document, with made-up items.</sub>
 </p>
 
 ---
 
-ASMO is a quiet month calendar. Each day holds a list of things to do, with times, subtasks and repeating routines, and a free page of notes underneath. You can use it by hand like any calendar.
+ASMO is one long document of your days, like a page in a docs app. Each day has a heading; under it, a line starting with a bullet is a to-do, a line with a time is on your schedule, and everything else is notes. Write the way you would in any document: when you pause, finished lines are sorted into items, with their times read from what you wrote ("9:30 to 10 tonight"). Strike a line or click its bullet to check it off.
 
-What makes it different is the `asmo` command. Any agent that can run a shell command (Claude Code, Codex) can read your days and change them: add and move items, check things off, and write a day's page in Markdown with pictures, tables and diagrams. Apps without a shell, such as the Claude desktop app, get the same thing through an MCP server. The app itself runs no language model: the agent you already use does the thinking, and ASMO stores exactly what it is told.
+Your items are kept in Apple Calendar (the ones with a time) and Reminders (the rest), in a calendar and a list named 逐日. That is how they reach your iPhone, watch and anything else signed in to iCloud. It works both ways: check something off, move it, delete it or add one on the phone, and the document follows within seconds.
 
-<p align="center">
-  <img src="assets/calendar.png" width="760" alt="ASMO's month view: each day lists its items with times, finished ones struck through" />
-  <br/><sub>The month view, with made-up items.</sub>
-</p>
-
-<p align="center">
-  <img src="assets/day-page.png" width="760" alt="A day opened in ASMO: timed items with subtasks, then notes with a checklist, a flowchart and a table" />
-  <br/><sub>One day: the items an agent added, and the page it wrote in Markdown (the flowchart is a mermaid block).</sub>
-</p>
+The `asmo` command is the other way in. Any agent that can run a shell command (Claude Code, Codex) can read your days and change them: add and move items, check things off, and write a day's page in Markdown with pictures, tables and diagrams. Apps without a shell, such as the Claude desktop app, get the same thing through an MCP server. The app itself runs no language model: the agent you already use does the thinking, and ASMO stores exactly what it is told.
 
 ## Features
 
-- **Month calendar:** every day shows its items in time order; finished ones are struck through. Click a day for a quick look, double-click to open it.
-- **A page per day:** a rich-text editor for the day's items and notes, with bold, italic, highlight, headings, lists, checkboxes, links and pictures.
-- **Subtasks and routines:** items nest up to three levels. Routines repeat every day, on weekdays, or on the days you choose, and can be skipped for one day.
+- **One document:** days follow each other in one scrolling page, today first. A sidebar lists the months to jump to, and **This month** brings you back.
+- **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own; headings, quotes and links stay notes. A time without morning or evening is read from the time of day ("10" written at 7 pm is 10 pm).
+- **Formatting:** bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type.
+- **Repeats without syntax:** the repeat button turns the line into a routine: daily, weekdays, weekly on that day, or monthly on that date. Routines can be skipped for one day.
+- **Subtasks:** items nest up to three levels; an indented line belongs to the one above.
 - **Important dates:** birthdays, anniversaries and holidays come back every year, in the Gregorian or the Chinese lunar calendar.
-- **Apple Calendar and Reminders:** optionally show your Apple Calendar events next to your items (read through the system, with your permission).
-- **The `asmo` command:** everything above from the command line, with JSON answers. Open windows update while the agent works.
+- **Apple Calendar and Reminders, both ways:** from today on, items with a time are events and the rest are reminders. Changes made there come back, including new ones added to the 逐日 list or calendar. Finished items are kept as completed; the past stays put.
+- **The `asmo` command:** everything above from the command line, with JSON answers, including importing years of pages at once (`asmo page import`). Open windows update while the agent works.
 - **Markdown pages:** agents write notes as Markdown: headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by file path or URL, and mermaid diagrams drawn by a copy of mermaid that ships in the app.
 - **Undo:** `asmo undo` takes back the last change an agent made, and the one before it, until the app is restarted.
 - **Updates itself:** a new version is one click: ASMO checks GitHub Releases and swaps itself in place.
 - **English and Chinese:** the interface follows your Mac, or pick a language in Settings. What you write is never translated.
-- **Private:** your data is a local file on your Mac. Nothing is uploaded and there is nothing to sign in to.
+- **Private:** your data is a local file on your Mac. ASMO has no server or account; what reaches your other devices goes through your own iCloud Calendar and Reminders.
 
 ## Install
 
@@ -78,7 +72,7 @@ cd ASMO
 script/install.sh      # builds, replaces /Applications/ASMO.app, installs asmo, the skill and the MCP entry
 ```
 
-`script/release.sh` builds the signed, notarized zip (it needs a Developer ID certificate and a notarytool profile). An iPhone app builds from the same source (`script/install-iphone.sh`, with your own Apple developer team), but the agent features are Mac-only for now, and the two do not sync yet.
+`script/release.sh` builds the signed, notarized zip (it needs a Developer ID certificate and a notarytool profile). An iPhone app builds from the same source (`script/install-iphone.sh`, with your own Apple developer team), but the agent features are Mac-only for now. Until the phone app syncs directly, use Calendar and Reminders on the phone.
 
 ## Use it from an agent
 
@@ -94,6 +88,8 @@ asmo add "Call Li about the lease" --day tomorrow --time 15:00 --end 15:30
 asmo set 3f9a --time 16:00                   # ids can be shortened to 4+ characters
 asmo done 3f9a
 asmo list today +7 --open                    # what is still open this week
+asmo routine add "Pay rent" --on monthly:1   # daily, weekdays, mon,thu, monthly…
+asmo mirror                                  # sync with Calendar and Reminders now
 asmo undo
 ```
 
@@ -150,7 +146,7 @@ asmo attach ~/Desktop/photo.jpg --day today --caption "whiteboard"
 
 ## Privacy
 
-ASMO makes two kinds of network requests of its own: the update check to GitHub Releases, and a preview when you paste a link. Pictures referenced by URL in a page are downloaded by the `asmo` command on your Mac. Whatever your agent sends to its own provider is between you and that agent; ASMO only receives the commands.
+ASMO makes two kinds of network requests of its own: the update check to GitHub Releases, and a preview when you paste a link. Calendar and Reminders sync goes through macOS (EventKit) to whatever account holds the 逐日 calendar and list, normally your iCloud; you can turn it off with `asmo mirror off`. Pictures referenced by URL in a page are downloaded by the `asmo` command on your Mac. Whatever your agent sends to its own provider is between you and that agent; ASMO only receives the commands.
 
 ## Development
 

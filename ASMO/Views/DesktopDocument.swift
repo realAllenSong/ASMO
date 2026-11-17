@@ -1173,11 +1173,18 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         guard let paragraph = paragraphs().last(where: { $0.range.location <= at }), !paragraph.isHeading,
               let day = paragraph.day ?? self.day(at: at), let date = day.dayOnly.date(in: Calendar.current) else { return nil }
         if let kind = paragraph.kind, kind.readOnly { return nil }
-        let weekday = ["日", "一", "二", "三", "四", "五", "六"][Calendar.current.component(.weekday, from: date) - 1]
+        let index = Calendar.current.component(.weekday, from: date) - 1
+        // "每周三" in Chinese; "Every Wednesday" in English (the tag written into the line stays "每周三").
+        let english = Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        let names: [String] = english ? formatter.weekdaySymbols : []
+        let weekday = ["日", "一", "二", "三", "四", "五", "六"][index]
+        let shown = names.indices.contains(index) ? names[index] : weekday
         let dayOfMonth = day.day ?? 1
         return [(String(localized: "每天"), "每天"),
                 (String(localized: "工作日（周一到周五）"), "工作日"),
-                (String(localized: "每周\(weekday)"), "每周\(weekday)"),
+                (String(localized: "每周\(shown)"), "每周\(weekday)"),
                 (String(localized: "每月\(dayOfMonth)日"), "每月\(dayOfMonth)号")]
     }
 
