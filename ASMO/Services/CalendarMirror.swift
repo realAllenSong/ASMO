@@ -138,6 +138,30 @@ final class CalendarMirror {
             byID[task.id] = task
         }
 
+        // Repeating items, a week of them: each day it repeats is a reminder (or an event, with a time) of its own,
+        // so today's is in "Today" on the phone. Checked off there, it is done here for that day. A day skipped
+        // here isn't written; yesterday's, left undone, goes (the settling below removes it).
+        var routineDays: [UUID: (routine: UUID, day: String)] = [:]
+        let routines = try context.fetch(FetchDescriptor<RoutineRecord>())
+        if !routines.isEmpty {
+            let marks = Dictionary(try context.fetch(FetchDescriptor<RoutineMark>()).map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) },
+                                   uniquingKeysWith: { first, _ in first })
+            for offset in 0..<7 {
+                guard let date = cal.date(byAdding: .day, value: offset, to: todayDate) else { continue }
+                let day = PlanDate.from(date, calendar: cal)
+                for routine in routines where routine.applies(to: day, calendar: cal) {
+                    let mark = marks[routine.id.uuidString + "|" + day.key]
+                    if mark?.skipped == true { continue }
+                    guard let item = MirrorItem.from(title: routine.title, year: day.year, month: day.month, day: day.day,
+                                                     hour: routine.startMinute.map { $0 / 60 }, minute: routine.startMinute.map { $0 % 60 },
+                                                     endMinute: routine.endMinute, done: mark != nil, notes: routine.ruleLabel) else { continue }
+                    let id = Self.occurrence(of: routine.id, on: day)
+                    wanted[id] = item
+                    routineDays[id] = (routine.id, day.key)
+                }
+            }
+        }
+
         // Birthdays and other yearly dates, written only: an event at the moment the day begins where it is kept
         // (a birthday in China on the 22nd is 11:00 on the 21st in New York), with an alert, so the phone says so.
         var oneWay = Set<UUID>()
@@ -185,7 +209,8 @@ final class CalendarMirror {
         let present = settled.present
         let extras = settled.stale.compactMap { objects[$0] }
 
-        let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records, oneWay: oneWay)
+        let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records, oneWay: oneWay,
+                                         checkOnly: Set(routineDays.keys))
         var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0, "adopted": adopted,
                       "tidied": extras.count]
         var deletedAny = false
@@ -212,6 +237,22 @@ final class CalendarMirror {
                 if wanted[id] == nil { records[id] = nil }
                 counts["removed", default: 0] += 1
             case .pull(let id, let item):
+                if let occurrence = routineDays[id] {
+                    // One day of a repeating item checked (or unchecked) there: that day's mark here.
+                    let routineID = occurrence.routine, dayKey = occurrence.day
+                    let existing = try context.fetch(FetchDescriptor<RoutineMark>(
+                        predicate: #Predicate { $0.routineID == routineID && $0.dayKey == dayKey }))
+                    if item.done {
+                        if existing.isEmpty { context.insert(RoutineMark(routineID: routineID, dayKey: dayKey, skipped: false)) }
+                        else { existing.forEach { $0.skipped = false } }
+                    } else {
+                        existing.filter { !$0.skipped }.forEach { context.delete($0) }
+                    }
+                    records[id] = MirrorRecord(item: item, identifier: present[id]?.identifier ?? "")
+                    pulledAny = true
+                    counts["pulled", default: 0] += 1
+                    continue
+                }
                 guard let task = byID[id] else { continue }
                 apply(item, to: task)
                 records[id] = MirrorRecord(item: item, identifier: present[id]?.identifier ?? "")
@@ -250,8 +291,9 @@ final class CalendarMirror {
         }
         if pulledAny || deletedAny { try context.save() }
         saveRecords(records)
-        return ["state": "ok", "calendar": calendar.title, "list": list.title, "items": wanted.count - oneWay.count,
-                "dates": oneWay.count,
+        return ["state": "ok", "calendar": calendar.title, "list": list.title,
+                "items": wanted.count - oneWay.count - routineDays.count,
+                "dates": oneWay.count, "routineDays": routineDays.count,
                 "events": wanted.filter { $0.value.kind == .event && !oneWay.contains($0.key) }.count,
                 "reminders": wanted.values.filter { $0.kind == .reminder }.count]
             .merging(counts.mapValues { $0 as Any }) { $1 }

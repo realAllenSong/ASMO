@@ -6,7 +6,7 @@
 
 - Platform: Apple silicon Mac, macOS 15 or later. Signed with a Developer ID and notarized.
 - Price: free, open source, MIT license. No account, no server of its own, no subscription.
-- Apple sync: from today on, timed items are events in a 逐日 calendar and the rest are reminders in a 逐日 list (iCloud); changes and new items made there come back. `asmo mirror` syncs now; `asmo mirror off` turns it off.
+- Apple sync: from today on, timed items are events in a 逐日 calendar and the rest are reminders in a 逐日 list (iCloud); changes and new items made there come back. Repeating items are written a week ahead, one per day; checking one off there marks that day done. `asmo mirror` syncs now; `asmo mirror off` turns it off.
 - Data: a local file in ~/Library/Application Support/ASMO; the app is the only writer, and open windows update while an agent works.
 - Install: download, unzip, move to Applications, open. The app sets up the asmo command, the Claude Code / Codex skill and the Claude desktop MCP entry by itself.
 - Updates: checks GitHub Releases after launch and daily; one click downloads, verifies the signature, swaps the app and reopens it.

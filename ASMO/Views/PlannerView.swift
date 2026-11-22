@@ -1127,7 +1127,9 @@ struct PlannerView: View {
         let today = max(lastKnownToday, clock.today)
         // Every day ahead is there to write on, empty or not: six weeks to begin with, further as the reader
         // scrolls to the end or jumps to a later month.
-        var days = Set((0...paperAheadDays).compactMap { clock.offset(days: $0) })
+        // Behind today too: every day back to the cutoff, written on or not (a day skipped for being empty
+        // reads as a gap in the dates).
+        var days = Set((-paperHistory...paperAheadDays).compactMap { clock.offset(days: $0) })
         for task in tasks where !task.calendarLinked {
             if let day = task.schedule?.dayOnly { days.insert(day) }
         }
@@ -1148,6 +1150,15 @@ struct PlannerView: View {
             result.insert(paperFocus)
             let focusDate = paperFocus.date(in: clock.calendar) ?? .now
             let monthEnd = clock.calendar.dateInterval(of: .month, for: focusDate)?.end ?? focusDate
+            // The month itself, every day of it.
+            if let month = clock.calendar.dateInterval(of: .month, for: focusDate) {
+                var date = month.start
+                while date < month.end {
+                    result.insert(PlanDate.from(date, calendar: clock.calendar))
+                    guard let next = clock.calendar.date(byAdding: .day, value: 1, to: date) else { break }
+                    date = next
+                }
+            }
             if let low = clock.calendar.date(byAdding: .day, value: -10, to: focusDate),
                let high = clock.calendar.date(byAdding: .day, value: 10, to: max(focusDate, monthEnd.addingTimeInterval(-1))) {
                 let lo = PlanDate.from(low, calendar: clock.calendar), hi = PlanDate.from(high, calendar: clock.calendar)
@@ -5179,20 +5190,28 @@ struct PaperContentsSidebar: View {
     let thisYear: Int
     let today: PlanDate
 
-    /// "11月" / "25年11月" in Chinese; "November" / "Nov 2025" in English.
-    static func label(_ month: PlanDate, thisYear: Int) -> String {
-        guard Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true else {
-            return month.year == thisYear ? "\(month.month)月" : "\(month.year % 100)年\(month.month)月"
-        }
+    /// "11月" in Chinese, "November" in English (the year is the heading the month sits under).
+    static func label(_ month: PlanDate) -> String {
+        guard Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true else { return "\(month.month)月" }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
-        guard (1...12).contains(month.month) else { return "\(month.month)" }
-        return month.year == thisYear ? formatter.monthSymbols[month.month - 1]
-            : "\(formatter.shortMonthSymbols[month.month - 1]) \(month.year)"
+        return (1...12).contains(month.month) ? formatter.monthSymbols[month.month - 1] : "\(month.month)"
     }
     let reduceMotion: Bool
     let pick: (PlanDate) -> Void
     let close: () -> Void
+
+    /// Years the reader opened or closed by hand (true = open). The others follow the rule in `isOpen`.
+    @State private var chosen: [Int: Bool] = [:]
+
+    /// A year is open when it is this year or the one on screen, unless the reader folded or unfolded it.
+    private func isOpen(_ year: Int) -> Bool {
+        chosen[year] ?? (year == thisYear || year == (model.visible ?? today).year)
+    }
+
+    private var years: [(year: Int, months: [PlanDate])] {
+        Dictionary(grouping: model.months) { $0.year }.keys.sorted().map { year in (year, model.months.filter { $0.year == year }) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -5209,25 +5228,53 @@ struct PaperContentsSidebar: View {
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(model.months, id: \.self) { first in
-                            let month = PlanDate(year: first.year, month: first.month)
-                            let current = (model.visible ?? today) == month
-                            Button { pick(first) } label: {
-                                Text(Self.label(first, thisYear: thisYear))
-                                    .font(.system(size: 13, weight: current ? .semibold : .regular))
-                                    .foregroundStyle(current ? theme.accent : theme.ink.opacity(0.62))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 16).frame(height: 30).contentShape(Rectangle())
+                        ForEach(years, id: \.year) { group in
+                            let open = isOpen(group.year)
+                            let onScreen = (model.visible ?? today).year == group.year
+                            // The year: a click folds or unfolds its months.
+                            Button {
+                                withAnimation(reduceMotion ? nil : .smooth(duration: 0.18)) { chosen[group.year] = !open }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                                        .rotationEffect(.degrees(open ? 90 : 0))
+                                        .foregroundStyle(theme.quiet.opacity(0.8))
+                                        .frame(width: 10)
+                                    Text(verbatim: String(group.year))
+                                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                                        .foregroundStyle(onScreen && !open ? theme.accent : theme.quiet)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 14).frame(height: 30).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .id(month)
+                            .accessibilityLabel(Text(verbatim: String(group.year)))
+                            .accessibilityValue(open ? Text("已展开") : Text("已折叠"))
+                            .id(group.year)
+                            if open {
+                                ForEach(group.months, id: \.self) { first in
+                                    let month = PlanDate(year: first.year, month: first.month)
+                                    let current = (model.visible ?? today) == month
+                                    Button { pick(first) } label: {
+                                        Text(Self.label(first))
+                                            .font(.system(size: 13, weight: current ? .semibold : .regular))
+                                            .foregroundStyle(current ? theme.accent : theme.ink.opacity(0.62))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.leading, 30).padding(.trailing, 16).frame(height: 28).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .id(month)
+                                }
+                            }
                         }
                     }
                     .padding(.bottom, 20)
                 }
                 .scrollIndicators(.never)
-                .onChange(of: model.visible) { _, month in
+                .onChange(of: model.visible) { old, month in
                     guard let month else { return }
+                    // Scrolling into another year opens it again (a fold made by hand lasts while the year is off screen).
+                    if old?.year != month.year, chosen[month.year] == false { chosen[month.year] = nil }
                     withAnimation(reduceMotion ? nil : .smooth(duration: 0.2)) { reader.scrollTo(month, anchor: .center) }
                 }
                 .onChange(of: model.months) { _, _ in

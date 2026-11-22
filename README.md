@@ -40,13 +40,13 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 
 ## Features
 
-- **One document:** days follow each other in one scrolling page, today first, and it runs on as you scroll: every day ahead is there to write on. A sidebar lists the months to jump to, two years ahead included, and **This month** brings you back.
+- **One document:** days follow each other in one scrolling page, today first, and it runs on as you scroll: every day ahead is there to write on. Days behind today are all there too, written on or not. A sidebar lists the months by year (a year folds away), two years ahead included, and **This month** brings you back.
 - **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own; headings, quotes and links stay notes. A time without morning or evening is read from the time of day ("10" written at 7 pm is 10 pm).
 - **Formatting:** bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type.
 - **Repeats without syntax:** the repeat button turns the line into a routine: daily, weekdays, weekly on that day, or monthly on that date. Routines can be skipped for one day.
 - **Subtasks:** items nest up to three levels; an indented line belongs to the one above.
 - **Important dates, in their own time zone:** birthdays, anniversaries and holidays come back every year, in the Gregorian or the Chinese lunar calendar. Each is kept in a time zone and shown when its day begins there: a birthday in China on the 22nd is at 11:00 on the 21st in New York. It is put in Apple Calendar at that moment, with an alert.
-- **Apple Calendar and Reminders, both ways:** from today on, items with a time are events and the rest are reminders. Changes made there come back, including new ones added to the 逐日 list or calendar. A to-do left undone rolls over to today and takes its reminder with it, so the phone shows each thing once. Finished items are kept as completed.
+- **Apple Calendar and Reminders, both ways:** from today on, items with a time are events and the rest are reminders. Repeating items are there too, a week ahead, one for each day: check one off on the phone and that day is done here. Changes made there come back, including new ones added to the 逐日 list or calendar. A to-do left undone rolls over to today and takes its reminder with it, so the phone shows each thing once. Finished items are kept as completed.
 - **The `asmo` command:** everything above from the command line, with JSON answers, including importing years of pages at once (`asmo page import`). Open windows update while the agent works.
 - **Markdown pages:** agents write notes as Markdown: headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by file path or URL, and mermaid diagrams drawn by a copy of mermaid that ships in the app.
 - **Undo:** `asmo undo` takes back the last change an agent made, and the one before it, until the app is restarted.

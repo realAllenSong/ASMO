@@ -136,15 +136,20 @@ public enum MirrorPlan {
     ///   - written: what was last written, by item id.
     ///   - oneWay: items only ever written, never read back (birthdays and other yearly dates): a change made
     ///     there is written over, and one deleted there is let go of.
+    ///   - checkOnly: one day of a repeating item. Its check mark comes back (done on the phone is done here);
+    ///     its words and day are the routine's, so any other change there is written over, and one deleted there
+    ///     is let go of.
     public static func actions(wanted: [UUID: MirrorItem], present: [UUID: (item: MirrorItem, identifier: String)],
-                               written: [UUID: MirrorRecord], oneWay: Set<UUID> = []) -> [MirrorAction] {
+                               written: [UUID: MirrorRecord], oneWay: Set<UUID> = [],
+                               checkOnly: Set<UUID> = []) -> [MirrorAction] {
         var actions: [MirrorAction] = []
         for (id, want) in wanted {
             let record = written[id]
             guard let have = present[id] else {
                 if let record, !record.released, record.item == want {
                     // Deleted in Calendar/Reminders while unchanged here: delete it here too, or (done) let go.
-                    actions.append(want.done || oneWay.contains(id) ? .release(id) : .deleteHere(id, identifier: record.identifier))
+                    actions.append(want.done || oneWay.contains(id) || checkOnly.contains(id)
+                                   ? .release(id) : .deleteHere(id, identifier: record.identifier))
                 } else if let record, record.released, record.item == want {
                     // Already let go of, and still unchanged here: nothing to do.
                 } else {
@@ -161,7 +166,7 @@ public enum MirrorPlan {
             // Something differs. If 逐日 is as last written, the change was made in Apple's app: take it back.
             if oneWay.contains(id) {
                 actions.append(.update(id, want, identifier: have.identifier))
-            } else if let record, record.item == want, have.item != record.item {
+            } else if let record, record.item == want, have.item != record.item, !checkOnly.contains(id) {
                 actions.append(.pull(id, have.item))
             } else if let record, have.item.done != record.item.done, want.done == record.item.done {
                 // Both changed, and what changed there is the check mark (an overdue reminder checked off on the

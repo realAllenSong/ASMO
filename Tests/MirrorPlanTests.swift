@@ -158,4 +158,35 @@ struct MirrorPlanTests {
                 == [.update(id, birthday, identifier: "e1")])
         #expect(MirrorPlan.actions(wanted: [id: birthday], present: [:], written: record, oneWay: [id]) == [.release(id)])
     }
+
+    // MARK: One day of a repeating item
+
+    @Test func aRoutineCheckedOffOnThePhoneIsDoneHere() {
+        let open = task("深蹲", hour: nil), checked = task("深蹲", hour: nil, done: true)
+        let record = [id: MirrorRecord(item: open, identifier: "r1")]
+        #expect(MirrorPlan.actions(wanted: [id: open], present: [id: (checked, "r1")], written: record, checkOnly: [id])
+                == [.pull(id, checked)])
+    }
+
+    @Test func aRoutineRenamedOrMovedOnThePhoneIsWrittenBack() {
+        let open = task("深蹲", hour: nil), renamed = task("深蹲 200", hour: nil), moved = task("深蹲", hour: nil, day: 21)
+        let record = [id: MirrorRecord(item: open, identifier: "r1")]
+        #expect(MirrorPlan.actions(wanted: [id: open], present: [id: (renamed, "r1")], written: record, checkOnly: [id])
+                == [.update(id, open, identifier: "r1")])
+        #expect(MirrorPlan.actions(wanted: [id: open], present: [id: (moved, "r1")], written: record, checkOnly: [id])
+                == [.update(id, open, identifier: "r1")])
+    }
+
+    @Test func aRoutineRenamedAndCheckedKeepsTheCheckOnly() {
+        let open = task("深蹲", hour: nil), both = task("深蹲 200", hour: nil, done: true), checked = task("深蹲", hour: nil, done: true)
+        let record = [id: MirrorRecord(item: open, identifier: "r1")]
+        #expect(MirrorPlan.actions(wanted: [id: open], present: [id: (both, "r1")], written: record, checkOnly: [id])
+                == [.pull(id, checked), .update(id, checked, identifier: "r1")])
+    }
+
+    @Test func aRoutineDayDeletedOnThePhoneIsLetGo() {
+        let open = task("深蹲", hour: nil)
+        #expect(MirrorPlan.actions(wanted: [id: open], present: [:], written: [id: MirrorRecord(item: open, identifier: "r1")], checkOnly: [id])
+                == [.release(id)])
+    }
 }
