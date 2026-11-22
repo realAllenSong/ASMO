@@ -1263,15 +1263,8 @@ struct PlannerView: View {
         HStack(spacing: 10) {
             Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
                 .accessibilityHidden(true)
-            if !paperContents {
-                Button { paperContents = true } label: {
-                    Image(systemName: "sidebar.left").font(.system(size: 13, weight: .medium)).foregroundStyle(theme.quiet)
-                        .frame(width: 30, height: 28).contentShape(Rectangle())
-                }
-                .buttonStyle(DesktopButtonStyle(theme: theme))
-                .help("显示目录")
-            }
             // Back to this month (to today in it), wherever the document is: ⇧⌘T too.
+            if openNote == nil {
             Button { jump(to: clock.today) } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
@@ -1282,6 +1275,7 @@ struct PlannerView: View {
             }
             .buttonStyle(DesktopButtonStyle(theme: theme))
             .help("回到这个月（今天） ⇧⌘T")
+            }
         }
     }
 
@@ -1339,12 +1333,7 @@ struct PlannerView: View {
                     }
                     .buttonStyle(DesktopButtonStyle(theme: theme))
                     .help("把整份文档复制成 Markdown，可以直接贴给 AI")
-                    Button { sheet = .settings } label: {
-                        Image(systemName: "gearshape").font(.system(size: 14, weight: .medium)).foregroundStyle(theme.quiet)
-                            .frame(width: 32, height: 28).contentShape(Rectangle())
-                    }
-                    .buttonStyle(DesktopButtonStyle(theme: theme))
-                    .accessibilityLabel("设置")
+
                 }
             }
             // The same height and padding as the calendar's row, so nothing jumps when switching.
@@ -1356,6 +1345,8 @@ struct PlannerView: View {
             .frame(height: 2)
             let days = documentDays(paperDays)
             HStack(spacing: 0) {
+                paperRail
+                Rectangle().fill(theme.line.opacity(0.6)).frame(width: 1)
                 if paperContents {
                     paperSidebar
                     Rectangle().fill(theme.line.opacity(0.6)).frame(width: 1)
@@ -1378,6 +1369,10 @@ struct PlannerView: View {
                 }
             }
         }
+        // A note opened from anywhere (⌘P, a link, an agent) brings the notes into the sidebar.
+        .onChange(of: openNote) { _, note in
+            if let note { sidebarMode = "notes"; lastNote = note.path }
+        }
         .overlay(alignment: .top) {
             if findingNote {
                 ZStack(alignment: .top) {
@@ -1397,18 +1392,76 @@ struct PlannerView: View {
         }
     }
 
-    private var paperSidebar: some View {
-        VStack(spacing: 0) {
-            PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
-                                 today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
-                                 showingDays: openNote == nil, showDays: { openNote = nil },
-                                 pick: { openNote = nil; jump(toMonth: $0) }, close: { paperContents = false })
-                .frame(maxHeight: .infinity)
-            Rectangle().fill(theme.line.opacity(0.6)).frame(height: 1)
-            NotesSidebar(library: noteLibrary, theme: theme, current: openNote, open: { openNote = $0 }, find: { findingNote = true })
-                .frame(maxHeight: .infinity)
+    /// What the sidebar lists: the days by month, or the notes.
+    @AppStorage("sidebarMode") private var sidebarMode = "days"
+    /// The note open when the notes were last left (opened again on coming back).
+    @AppStorage("lastNote") private var lastNote = ""
+
+    /// The rail at the far left: the days, the notes, finding, settings. A click on the one showing folds its list
+    /// away (and back).
+    private var paperRail: some View {
+        VStack(spacing: 6) {
+            railButton("calendar", label: "日程", shortcut: "1", selected: sidebarMode == "days") { showDays() }
+            railButton("doc.text", label: "笔记", shortcut: "2", selected: sidebarMode == "notes") { showNotes() }
+            railButton("magnifyingglass", label: "找笔记 ⌘P", shortcut: nil, selected: false) { findingNote = true }
+            Spacer()
+            railButton("gearshape", label: "设置", shortcut: nil, selected: false) { sheet = .settings }
         }
-        .frame(width: 200)
+        .padding(.vertical, 10)
+        .frame(width: 46)
+        .background(theme.sidebar)
+    }
+
+    private func railButton(_ symbol: String, label: LocalizedStringKey, shortcut: KeyEquivalent?, selected: Bool,
+                            action: @escaping () -> Void) -> some View {
+        let button = Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 15, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? theme.accent : theme.quiet)
+                .frame(width: 34, height: 34)
+                .background(selected ? theme.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(Text(label))
+        return Group {
+            if let shortcut { button.keyboardShortcut(shortcut, modifiers: .command) } else { button }
+        }
+    }
+
+    private func showDays() {
+        if sidebarMode == "days", openNote == nil { paperContents.toggle(); return }
+        sidebarMode = "days"
+        paperContents = true
+        if let openNote { lastNote = openNote.path }
+        openNote = nil
+    }
+
+    private func showNotes() {
+        if sidebarMode == "notes", openNote != nil { paperContents.toggle(); return }
+        sidebarMode = "notes"
+        paperContents = true
+        if openNote == nil {
+            let last = URL(fileURLWithPath: lastNote)
+            if !lastNote.isEmpty, FileManager.default.fileExists(atPath: last.path) { openNote = last }
+            else { openNote = noteLibrary.notes.max { noteLibrary.modifiedDate($0) < noteLibrary.modifiedDate($1) } }
+        }
+    }
+
+    private var paperSidebar: some View {
+        Group {
+            if sidebarMode == "notes" {
+                NotesSidebar(library: noteLibrary, theme: theme, current: openNote, open: { openNote = $0; lastNote = $0.path },
+                             find: { findingNote = true })
+            } else {
+                PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
+                                     today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
+                                     showingDays: openNote == nil, showDays: { openNote = nil },
+                                     pick: { openNote = nil; jump(toMonth: $0) }, close: { paperContents = false })
+            }
+        }
+        .frame(width: 210)
+        .frame(maxHeight: .infinity)
         .background(theme.sidebar)
     }
 
