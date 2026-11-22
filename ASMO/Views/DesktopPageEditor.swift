@@ -705,7 +705,7 @@ struct PageToolbar: View {
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(theme.surface.opacity(0.8), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(theme.toolbar, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var divider: some View {

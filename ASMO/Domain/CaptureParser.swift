@@ -66,9 +66,13 @@ enum CaptureParser {
 
     private static func embedded(in source: String, clock: CaptureClock, selectedDay: PlanDate?,
                                  timeOnly: Bool) -> (date: PlanDate?, rest: String, endMinute: Int?)? {
-        let times = #"上午|早上|中午|下午|傍晚|晚上|凌晨|(?<![\d:])\d{1,2}[:：]\d{2}|(?<![\d.])\d{1,2}\s*(?:am|pm)\b|at\s+\d|(?<!一)[两二三四五六七八九十\d]+[点時时]|十一点|十二点"#
+        let times = #"上午|早上|中午|下午|傍晚|晚上|凌晨|(?<![\d:./])[两二三四五六七八九十\d]{1,3}\s*(?:到|至|-|–|—|~|～)\s*[两二三四五六七八九十\d]{1,3}\s*[点時时]|(?<![\d:./])\d{1,2}(?::\d{2})?\s*(?:-|–|—|~|～|to)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|(?<![\d:])\d{1,2}[:：]\d{2}|(?<![\d.])\d{1,2}\s*(?:am|pm)\b|at\s+\d|(?<!一)[两二三四五六七八九十\d]+[点時时]|十一点|十二点"#
         let days = #"\d{4}[.／/\-年]\d|\d{1,2}[.／/月]\d|明年|今年|[一二两三四五六七八九十\d]+月[一二两三四五六七八九十\d]+[日号]|下下个月|下个月|这个月|大后天|后天|明天|今天|今晚|明早|tomorrow\b|today\b|(?:下|这|本)?(?:周|星期)[一二三四五六日天]|(?:next|this)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"#
-        let pattern = timeOnly ? times : days + "|" + times
+        // Two dates in one line ("1/15到 或者1/19到") are options being weighed, not the day of the thing: only a
+        // time is taken from it.
+        let choices = (try? NSRegularExpression(pattern: #"(?<!\d)\d{1,2}[/／月]\d{1,2}(?!\d)"#))?
+            .numberOfMatches(in: source, range: NSRange(location: 0, length: (source as NSString).length)) ?? 0
+        let pattern = timeOnly || choices >= 2 ? times : days + "|" + times
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
         let text = source as NSString
         for match in regex.matches(in: source, range: NSRange(location: 0, length: text.length)) {
@@ -281,16 +285,18 @@ enum CaptureParser {
         }
 
         let hasDayOrMonth = rest != source
-        let timeText = rest.trimmed
+        let timeText = Self.unitOnBoth(rest.trimmed)
         if let time = timePrefix(timeText) {
             if !hasDayOrMonth { date = selectedDay?.day == nil ? today : selectedDay }
             rest = String(timeText.dropFirst(time.length))
             if date?.day == nil || !time.isValid { return (nil, rest, nil) }
             date?.hour = time.hour
             date?.minute = time.minute
-            // Today, a time that doesn't say morning or evening and whose morning has already gone by is this
-            // evening's: "9点半" written at 7 pm is 21:30.
-            if !time.marked, (1...11).contains(time.hour), date?.dayOnly == clock.actualToday,
+            // A time that doesn't say morning or evening: one to six is the afternoon ("两点开会" is 14:00, on any
+            // day); today, one whose morning has already gone by is this evening's ("9点半" written at 7 pm is 21:30).
+            if !time.marked, (1...6).contains(time.hour) {
+                date?.hour = time.hour + 12
+            } else if !time.marked, (7...11).contains(time.hour), date?.dayOnly == clock.actualToday,
                time.hour * 60 + time.minute < clock.actualMinuteOfDay {
                 date?.hour = time.hour + 12
             }
@@ -325,6 +331,19 @@ enum CaptureParser {
 
     /// A time at the start of `text`. `marked`: it says which half of the day (上午/下午…, am/pm, or a 24-hour
     /// clock like 21:30 or 09:30); unmarked, 9:30 could be morning or evening.
+    /// A range with the unit only after its end ("2-3点", "二到三点半", "2~3点"): the unit goes after the start
+    /// too ("2点-3点"), so the start is read as a time and not left in the title.
+    static func unitOnBoth(_ text: String) -> String {
+        if let parts = text.match(#"^(\d{1,2}(?::\d{2})?)\s*(-|–|—|~|～|to)\s*(\d{1,2}(?::\d{2})?)\s*(am|pm)\b"#),
+           !parts[1].isEmpty {
+            return parts[1] + parts[4] + "-" + String(text.dropFirst(parts[0].count - parts[3].count - parts[4].count).drop { $0 == " " })
+        }
+        let digits = "[一二两三四五六七八九十零〇\\d]"
+        guard let parts = text.match("^((?:上午|早上|中午|下午|傍晚|晚上|凌晨)?\\s*" + digits + "{1,3})\\s*(到|至|-|–|—|~|～)\\s*("
+                                     + digits + "{1,3}\\s*[点時时])") else { return text }
+        return parts[1] + "点" + parts[2] + String(text.dropFirst(parts[0].count - parts[3].count))
+    }
+
     private static func timePrefix(_ text: String) -> (length: Int, hour: Int, minute: Int, isValid: Bool, marked: Bool)? {
         // Dictation writes "下午3:00" / "晚上10:30": a part of day followed by clock digits.
         if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)\s*(\d{1,2})[:：](\d{2})(?!\d)"#),
@@ -334,7 +353,7 @@ enum CaptureParser {
             if parts[1] == "凌晨", hour == 12 { hour = 0 }
             return (parts[0].count, hour, minute, valid, true)
         }
-        if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)?\s*(?:是|在)?\s*([一二两三四五六七八九十零〇\d]+)[点時时](?:(半|一刻|三刻)|([一二两三四五六七八九十零〇\d]+)分?)?"#),
+        if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)?\s*(?:是|在)?\s*([一二两三四五六七八九十零〇\d]+)[点時时]钟?(?:(半|一刻|三刻)|([一二两三四五六七八九十零〇\d]+)分?)?"#),
            var hour = number(parts[2]) {
             let valid = parts[1].isEmpty || (1...12).contains(hour)
             if ["中午", "下午", "傍晚", "晚上"].contains(parts[1]), hour < 12,
@@ -348,7 +367,7 @@ enum CaptureParser {
             return (parts[0].count, hour % 12 + (parts[3].lowercased() == "pm" ? 12 : 0),
                     Int(parts[2]) ?? 0, (1...12).contains(hour), true)
         }
-        if let parts = text.match(#"^(?:at\s+)?(\d{1,2}):(\d{2})(?!\d)"#),
+        if let parts = text.match(#"^(?:at\s+)?(\d{1,2})[:：](\d{2})(?!\d)"#),
            let hour = Int(parts[1]), let minute = Int(parts[2]) {
             return (parts[0].count, hour, minute, true, hour >= 12 || parts[1].hasPrefix("0"))
         }

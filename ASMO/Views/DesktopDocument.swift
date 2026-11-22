@@ -173,8 +173,11 @@ extension NSAttributedString.Key {
 /// Writing is plain typing; finished lines become items without asking.
 enum NoteRule {
     static func stripMarker(_ text: String) -> String {
+        // A bullet with nothing after it (the line was trimmed: "•").
+        if ["•", "◦", "▪", "‣", "☐", "☑", "-", "*"].contains(text.trimmingCharacters(in: .whitespaces)) { return "" }
         for marker in ["• ", "◦ ", "▪ ", "‣ ", "☐ ", "☑ ", "- ", "* "] where text.hasPrefix(marker) {
-            return String(text.dropFirst(marker.count).drop { $0 == " " })
+            // A second bullet typed after the one Return put there ("•  • 跟Li聊天") goes too.
+            return stripMarker(String(text.dropFirst(marker.count).drop { $0 == " " }))
         }
         // A numbered list ("1.", "2)", "i.", "iv.", "a)"): the number is the list's, not the item's.
         if let range = text.range(of: #"^(?:\d{1,2}|[ivx]{1,4}|[a-h])[.)、]\s+"#, options: [.regularExpression, .caseInsensitive]) {
@@ -285,6 +288,7 @@ struct DayDocumentView: NSViewRepresentable {
         context.coordinator.view = view
         context.coordinator.rebuildRequest = rebuildRequest
         context.coordinator.builtDark = theme.dark
+        if scrolls { view.dayRule = NSColor(theme.dayRule) }
         context.coordinator.autofocused = autofocus
         if autofocus || controller?.textView == nil { controller?.textView = view }
         context.coordinator.build(days, anchor: anchor)
@@ -336,6 +340,7 @@ struct DayDocumentView: NSViewRepresentable {
         // The look changed (light ↔ dark): the text was drawn in the old ink, so draw it again.
         if context.coordinator.builtDark != theme.dark {
             context.coordinator.builtDark = theme.dark
+            if scrolls { (scroll.documentView as? DocTextView)?.dayRule = NSColor(theme.dayRule) }
             context.coordinator.syncEdits()
             context.coordinator.build(days, anchor: context.coordinator.anchor ?? anchor)
             return
@@ -393,6 +398,29 @@ final class DocScrollView: NSScrollView {
 
 final class DocTextView: NSTextView {
     weak var coordinator: DocCoordinator?
+    /// A hairline above every day but the first, across the column of text: the days read as entries, not as
+    /// headings floating in the page (nil: none, as in a single day's page).
+    var dayRule: NSColor? { didSet { needsDisplay = true } }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let dayRule, let layout = layoutManager, let container = textContainer, let storage = textStorage,
+              storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        let visible = rect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let glyphs = layout.glyphRange(forBoundingRectWithoutAdditionalLayout: visible, in: container)
+        let characters = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let left = textContainerInset.width, width = max(0, bounds.width - textContainerInset.width * 2)
+        dayRule.setFill()
+        storage.enumerateAttribute(.asmoDay, in: characters) { value, range, _ in
+            guard value != nil, range.location > 0 else { return }
+            let glyph = layout.glyphIndexForCharacter(at: range.location)
+            let line = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            // The heading's line starts with its space above: the rule sits in that space, nearer the day above.
+            let y = (line.minY + origin.y + 3).rounded(.down) + 0.5
+            NSRect(x: left, y: y - 0.5, width: width, height: 1).intersection(rect).fill()
+        }
+    }
     /// The page's own undo history (the window's shared one outlived the page and crashed on ⌘Z).
     private let pageUndo = UndoManager()
     override var undoManager: UndoManager? { pageUndo }
@@ -947,8 +975,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             return text
         }
         let paragraph = NSMutableParagraphStyle()
-        paragraph.paragraphSpacingBefore = 22
-        paragraph.paragraphSpacing = 6
+        // Days follow on closely (the empty line each day ends with already parts them, and the rule marks it).
+        paragraph.paragraphSpacingBefore = 10
+        paragraph.paragraphSpacing = 4
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: day.isToday ? 22 : 16, weight: .semibold),
             .foregroundColor: day.isToday ? accent : ink,
@@ -1504,8 +1533,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         syncEdits()
         let cursor = view.selectedRange().location
         let candidates = paragraphs().filter { paragraph in
+            // A bullet with nothing after it (Return pressed once too often) is not a thing to do.
             guard !paragraph.isHeading, paragraph.id == nil, !paragraph.isNote, paragraph.day != nil,
-                  !paragraph.text.isEmpty else { return false }
+                  !Self.stripMarker(paragraph.text).trimmed.isEmpty else { return false }
             if !includingCurrent, self.isCurrent(paragraph, cursor: cursor) { return false }
             return true
         }
@@ -2249,6 +2279,58 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
                 changed = true
             }
         }
+        if orderItems(days) { changed = true }
+    }
+
+    /// Each day's items stand together under its heading in the day's order: timed ones by time first, then the
+    /// rest (the order `days` gives). A line written at the bottom that became an item, or an item given a time,
+    /// moves up into its place. The cursor goes with the line it's on. Not while a line between two items is being
+    /// written (it'd be pushed away under the writer); that day waits.
+    @discardableResult
+    private func orderItems(_ days: [DocDay]) -> Bool {
+        guard let view, let storage = view.textStorage else { return false }
+        var moved = false
+        for day in days where !day.lines.isEmpty {
+            let list = paragraphs()
+            guard let headingIndex = list.firstIndex(where: { $0.isHeading && $0.day == day.day }) else { continue }
+            var end = headingIndex + 1
+            while end < list.count, !list[end].isHeading { end += 1 }
+            let section = Array(list[(headingIndex + 1)..<end])
+            let wantedIDs = day.lines.map(\.id)
+            let wantedSet = Set(wantedIDs)
+            let items = section.filter { $0.id.map(wantedSet.contains) ?? false }
+            // Already right: the items are the first lines under the heading, in the wanted order.
+            let leading = section.prefix { $0.id != nil }
+            if items.count == wantedIDs.count, leading.count == items.count, items.map({ $0.id! }) == wantedIDs { continue }
+            // Every wanted line must be on the page (a line still to be added comes on the next pass).
+            guard items.count == wantedIDs.count, let first = items.first, let last = items.last else { continue }
+            let cursor = view.selectedRange()
+            let span = NSRange(location: first.range.location, length: NSMaxRange(last.range) - first.range.location)
+            let cursorParagraph = section.first { NSLocationInRange(cursor.location, $0.range) }
+            if let paragraph = cursorParagraph, paragraph.id == nil, NSLocationInRange(cursor.location, span) {
+                reconciled = []
+                continue
+            }
+            // Where the cursor is, to put it back: on an item line (it moves with its line), or below/above.
+            let onItem = cursorParagraph.flatMap { paragraph in paragraph.id.map { ($0, cursor.location - paragraph.range.location) } }
+            let fromEnd = storage.length - cursor.location
+            let before = cursor.location < first.range.location
+            // Take the item lines out, bottom-up, and put them back, in order, right under the heading.
+            for item in items.reversed() { storage.deleteCharacters(in: item.range) }
+            let block = NSMutableAttributedString()
+            for line in day.lines { block.append(render(line, day: day.day)) }
+            let insertAt = NSMaxRange(list[headingIndex].range)
+            storage.insert(block, at: insertAt)
+            moved = true
+            if let (id, offset) = onItem, let again = paragraphs().first(where: { $0.id == id }) {
+                view.setSelectedRange(NSRange(location: min(storage.length, again.range.location + max(0, min(offset, again.range.length - 1))), length: 0))
+            } else if before {
+                view.setSelectedRange(NSRange(location: min(cursor.location, storage.length), length: cursor.length))
+            } else {
+                view.setSelectedRange(NSRange(location: max(0, storage.length - fromEnd), length: 0))
+            }
+        }
+        return moved
     }
 
     func scroll(to day: PlanDate) {

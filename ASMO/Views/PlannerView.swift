@@ -466,7 +466,9 @@ struct PlannerView: View {
             // Mac: the calendar is home; a day is written in its popup (DayEditorSheet). The month only redraws
             // when what it shows changed (opening a day, typing in it, the notice… leave it alone: no hitch).
             // The Mac is one document; seeing the month is Apple Calendar's job (the 逐日 calendar there).
+            // The toolbar row and the page are one white surface in the light look; the sidebar is grey beside it.
             paperHome
+                .background(theme.sheet.ignoresSafeArea())
             #else
             // iPhone: the calendar is home; a day opens as a pushed page (system back button and edge swipe).
             NavigationStack {
@@ -1312,11 +1314,14 @@ struct PlannerView: View {
                 }
                 DayDocumentView(days: days, anchor: paperFocus ?? clock.today, jump: paperJump, theme: theme,
                                 actions: documentActions, controller: pageController, organizeRequest: organizeTick,
-                                rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: false,
+                                rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: true,
                                 scrolls: true, visibleDay: { [paperContentsModel] day in
                                     let month = PlanDate(year: day.year, month: day.month)
                                     if paperContentsModel.visible != month { paperContentsModel.visible = month }
                                 }, reachedEnd: { extendPaper() }, endsNear: clock.offset(days: paperAheadDays - 3))
+                    // The light look: the page is white, edge to edge (the sidebar already is the contents; a
+                    // margin either side would only take room from the writing).
+                    .background(theme.sheet)
             }
         }
     }
@@ -1325,6 +1330,7 @@ struct PlannerView: View {
         PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
                              today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
                              pick: { jump(toMonth: $0) }, close: { paperContents = false })
+            .background(theme.sidebar)
     }
 
     /// A month from the contents: its first written day at the top of the window.
@@ -3569,13 +3575,28 @@ struct PlannerView: View {
         return true
     }
 
+    /// The words of a line whose time is still the one the page drew ("10:00–12:00 开会" for an item at 10:00–12:00):
+    /// the time wasn't touched, so it is kept as it is, not read again. Read again in the evening, "10:00" on today
+    /// would be taken for 22:00 (a time written without morning or evening after its morning has passed).
+    private func wordsAfterDrawnTime(_ text: String, start: Int?, end: Int?) -> String? {
+        guard let start else { return nil }
+        let label = PlannerClockTime.label(start) + (end.map { "–" + PlannerClockTime.label($0) } ?? "")
+        let trimmed = text.trimmed
+        guard trimmed.hasPrefix(label + " ") else { return nil }
+        let words = String(trimmed.dropFirst(label.count)).trimmed
+        return words.isEmpty ? nil : words
+    }
+
     /// An item line was edited in the document: its text (with any time typed in it) becomes the item.
     private func updateDocumentLine(_ line: DocLine, text: String, day: PlanDate, parent: UUID?) {
         var parsed = CaptureParser.manual(text, clock: clock, selectedDay: day)
         // Keep the user's words exactly; only a time or date written at the start of the line is taken out of the
         // title ("15:00 开会"). One in the middle of the sentence ("订周五的票") is part of the words.
         let leads = !parsed.title.trimmed.isEmpty && text.trimmed.hasSuffix(parsed.title.trimmed)
-        if !leads {
+        // A time anywhere in the line is taken ("跟Li聊天 2-3点", written after the words); a day inside the
+        // sentence is not ("订周五的票" stays as written, on its day).
+        let timeHere = parsed.schedule?.hour != nil && parsed.schedule?.dayOnly == day.dayOnly && !parsed.title.trimmed.isEmpty
+        if !leads && !timeHere {
             parsed.title = text.trimmed
             parsed.schedule = day.dayOnly
             parsed.endMinute = nil
@@ -3593,13 +3614,21 @@ struct PlannerView: View {
                 return
             }
             var schedule = task.schedule ?? day
-            if let date = parsed.schedule, date.day != nil, date.dayOnly != day { schedule = date }
+            var title = title
+            var end = minute == nil ? nil : parsed.endMinute
+            if let words = wordsAfterDrawnTime(text, start: task.schedule?.minuteOfDay, end: task.endMinute) {
+                // The time is as drawn: only the words (or the day the line sits under) changed.
+                title = words
+                schedule = day.dayOnly
+                schedule.hour = task.schedule?.hour
+                schedule.minute = task.schedule?.minute
+                end = task.endMinute
+            } else if let date = parsed.schedule, date.day != nil, date.dayOnly != day { schedule = date }
             else {
                 schedule = day.dayOnly
                 schedule.hour = minute.map { $0 / 60 }
                 schedule.minute = minute.map { $0 % 60 }
             }
-            let end = minute == nil ? nil : parsed.endMinute
             guard task.title != title || task.schedule != schedule || task.endMinute != end || task.parentID != parent else { return }
             task.title = title
             task.schedule = schedule
@@ -3622,6 +3651,13 @@ struct PlannerView: View {
                 routine.endMinute = rule.endMinute
                 persist()
                 announce(String(localized: "「\(rule.title)」改成\(RoutineParser.label(rule.weekdays, monthDay: rule.monthDay))"))
+                return
+            }
+            if let words = wordsAfterDrawnTime(text, start: routine.startMinute, end: routine.endMinute) {
+                // Its time is as drawn: only the words changed.
+                guard routine.title != words else { return }
+                routine.title = words
+                persist()
                 return
             }
             guard routine.title != title || routine.startMinute != minute else { return }
