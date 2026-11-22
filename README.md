@@ -27,7 +27,7 @@
 
 ---
 
-ASMO is one long document of your days, like a page in a docs app. Each day has a heading; under it, a line starting with a bullet is a to-do, a line with a time is on your schedule, and everything else is notes. Write the way you would in any document: when you pause, finished lines are sorted into items, with their times read from what you wrote ("9:30 to 10 tonight"). Strike a line or click its bullet to check it off.
+ASMO is one long document of your days, laid out like a journal: each day's date sits in the margin, its things to do beside it. Under each date, a line starting with a bullet is a to-do, a line with a time is on your schedule, and everything else is notes. Write the way you would in any document: when you pause, finished lines are sorted into items, with their times read from what you wrote, however it's written ("2-3点", "二到三点", "2pm-3pm", at the start of the line or the end), and each day's items stand in time order, the timed ones first. Strike a line or click its bullet to check it off.
 
 Your items are kept in Apple Calendar (the ones with a time) and Reminders (the rest), in a calendar and a list named 逐日. That is how they reach your iPhone, watch and anything else signed in to iCloud. It works both ways: check something off, move it, delete it or add one on the phone, and the document follows within seconds.
 
@@ -41,7 +41,7 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 ## Features
 
 - **One document:** days follow each other in one scrolling page, today first, and it runs on as you scroll: every day ahead is there to write on. Days behind today are all there too, written on or not. A sidebar lists the months by year (a year folds away), two years ahead included, and **This month** brings you back.
-- **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own; headings, quotes and links stay notes. A time without morning or evening is read from the time of day ("10" written at 7 pm is 10 pm).
+- **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own and move into time order; headings, quotes and links stay notes. A time without morning or evening reads the way it's said: one to six is the afternoon, and today a morning hour already gone by is the evening ("10" written at 7 pm is 10 pm).
 - **Formatting:** bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type.
 - **Repeats without syntax:** the repeat button turns the line into a routine: daily, weekdays, weekly on that day, or monthly on that date. Routines can be skipped for one day.
 - **Subtasks:** items nest up to three levels; an indented line belongs to the one above.

@@ -158,6 +158,8 @@ enum RichTitle {
 
 extension NSAttributedString.Key {
     static let asmoDay = NSAttributedString.Key("asmo.day")
+    /// On a day's (hidden) heading in the journal layout: the date as drawn in the margin to its left.
+    static let asmoGutter = NSAttributedString.Key("asmo.gutter")
     static let asmoLine = NSAttributedString.Key("asmo.line")
     static let asmoKind = NSAttributedString.Key("asmo.kind")
     static let asmoCheck = NSAttributedString.Key("asmo.check")
@@ -288,7 +290,10 @@ struct DayDocumentView: NSViewRepresentable {
         context.coordinator.view = view
         context.coordinator.rebuildRequest = rebuildRequest
         context.coordinator.builtDark = theme.dark
-        if scrolls { view.dayRule = NSColor(theme.dayRule) }
+        if scrolls {
+            view.dayRule = NSColor(theme.dayRule)
+            view.gutter = DocScrollView.gutter
+        }
         context.coordinator.autofocused = autofocus
         if autofocus || controller?.textView == nil { controller?.textView = view }
         context.coordinator.build(days, anchor: anchor)
@@ -381,7 +386,9 @@ struct DayDocumentView: NSViewRepresentable {
 /// The document's scroll view. The text keeps a readable width, centered, however wide the window is.
 final class DocScrollView: NSScrollView {
     var scrolls = true
-    static let textWidth: CGFloat = 820
+    /// The journal's date margin, inside the column.
+    static let gutter: CGFloat = 112
+    static let textWidth: CGFloat = 820 + gutter
 
     override func tile() {
         super.tile()
@@ -402,8 +409,14 @@ final class DocTextView: NSTextView {
     /// headings floating in the page (nil: none, as in a single day's page).
     var dayRule: NSColor? { didSet { needsDisplay = true } }
 
+    /// The journal layout's margin for the dates, to the left of the writing (0: none).
+    var gutter: CGFloat = 0 {
+        didSet { textContainer?.lineFragmentPadding = gutter; needsDisplay = true }
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
+        drawGutter(in: rect)
         guard let dayRule, let layout = layoutManager, let container = textContainer, let storage = textStorage,
               storage.length > 0 else { return }
         let origin = textContainerOrigin
@@ -414,6 +427,7 @@ final class DocTextView: NSTextView {
         dayRule.setFill()
         storage.enumerateAttribute(.asmoDay, in: characters) { value, range, _ in
             guard value != nil, range.location > 0 else { return }
+            let range = (storage.string as NSString).paragraphRange(for: NSRange(location: range.location, length: 0))
             let glyph = layout.glyphIndexForCharacter(at: range.location)
             let line = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
             // The heading's line starts with its space above: the rule sits in that space, nearer the day above.
@@ -421,6 +435,31 @@ final class DocTextView: NSTextView {
             NSRect(x: left, y: y - 0.5, width: width, height: 1).intersection(rect).fill()
         }
     }
+    /// Each day's date, in the margin, level with the day's first line.
+    private func drawGutter(in rect: NSRect) {
+        guard gutter > 0, let layout = layoutManager, let container = textContainer, let storage = textStorage,
+              storage.length > 0 else { return }
+        let origin = textContainerOrigin
+        // A label hangs below its heading: look a little above what's being drawn for headings whose label reaches in.
+        let visible = rect.offsetBy(dx: -origin.x, dy: -origin.y).insetBy(dx: 0, dy: -60)
+        let glyphs = layout.glyphRange(forBoundingRectWithoutAdditionalLayout: visible, in: container)
+        let characters = layout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let string = storage.string as NSString
+        storage.enumerateAttribute(.asmoGutter, in: characters) { value, range, _ in
+            guard let label = value as? NSAttributedString else { return }
+            let heading = string.paragraphRange(for: NSRange(location: range.location, length: 0))
+            guard NSMaxRange(heading) < storage.length || heading.location == range.location else { return }
+            // The day's first line: right after the heading.
+            let next = min(NSMaxRange(heading), storage.length - 1)
+            let line = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: next), effectiveRange: nil)
+            let used = layout.lineFragmentUsedRect(forGlyphAt: layout.glyphIndexForCharacter(at: next), effectiveRange: nil)
+            let top = origin.y + (NSMaxRange(heading) >= storage.length ? line.maxY : max(line.minY, used.minY))
+            let box = NSRect(x: origin.x, y: top + 2, width: gutter - 16, height: 60)
+            guard box.intersects(rect) else { return }
+            label.draw(with: box, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
+    }
+
     /// The page's own undo history (the window's shared one outlived the page and crashed on ⌘Z).
     private let pageUndo = UndoManager()
     override var undoManager: UndoManager? { pageUndo }
@@ -974,6 +1013,21 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             text.append(NSAttributedString(string: "\n", attributes: attributes))
             return text
         }
+        if parent.scrolls {
+            // The journal: the date is drawn in the margin, beside the day's first line (see DocTextView); the
+            // heading stays in the text (what the day is, for copying, jumping and saving) as a hairline-high line.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.maximumLineHeight = 1
+            paragraph.minimumLineHeight = 1
+            paragraph.paragraphSpacingBefore = 16
+            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 1), .foregroundColor: NSColor.clear,
+                                                             .paragraphStyle: paragraph]
+            let text = NSMutableAttributedString(string: day.heading, attributes: attributes.merging([
+                .asmoDay: day.day.key, .asmoGutter: gutterLabel(day),
+            ]) { $1 })
+            text.append(NSAttributedString(string: "\n", attributes: attributes))
+            return text
+        }
         let paragraph = NSMutableParagraphStyle()
         // Days follow on closely (the empty line each day ends with already parts them, and the rule marks it).
         paragraph.paragraphSpacingBefore = 10
@@ -987,6 +1041,40 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         // The line break carries no markers, so text typed on the next line never inherits them.
         text.append(NSAttributedString(string: "\n", attributes: attributes))
         return text
+    }
+
+    /// The date in the margin: "11/22 周日" (another year: "25/3/4 周二"; a month's plans: "2027年3月"), today in the
+    /// accent colour with 今天 under it.
+    private func gutterLabel(_ day: DocDay) -> NSAttributedString {
+        let english = Bundle.main.preferredLocalizations.first?.hasPrefix("en") == true
+        let date = day.day
+        let thisYear = Calendar.current.component(.year, from: .now)
+        let strong = day.isToday ? accent : ink
+        let result = NSMutableAttributedString()
+        let big = NSFont.monospacedDigitSystemFont(ofSize: day.isToday ? 17 : 15, weight: .semibold)
+        let small = NSFont.systemFont(ofSize: 12, weight: .medium)
+        guard let dayOfMonth = date.day else {
+            let month = english ? "\(DateFormatter().shortMonthSymbols[max(0, min(11, date.month - 1))]) \(date.year)"
+                : (date.year == thisYear ? "\(date.month)月" : "\(date.year)年\(date.month)月")
+            result.append(NSAttributedString(string: month, attributes: [.font: big, .foregroundColor: strong]))
+            result.append(NSAttributedString(string: "\n" + String(localized: "这个月里"), attributes: [.font: small, .foregroundColor: quiet]))
+            return result
+        }
+        let numbers = (date.year == thisYear ? "" : String(date.year % 100) + "/") + "\(date.month)/\(dayOfMonth)"
+        let weekday = date.date(in: Calendar.current).map { value -> String in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: english ? "en_US" : "zh_CN")
+            formatter.dateFormat = english ? "EEE" : "EEE"
+            return formatter.string(from: value)
+        } ?? ""
+        result.append(NSAttributedString(string: numbers, attributes: [.font: big, .foregroundColor: strong]))
+        result.append(NSAttributedString(string: " " + weekday, attributes: [.font: small, .foregroundColor: day.isToday ? accent : quiet]))
+        let relative = day.heading.components(separatedBy: " · ").dropFirst().last
+        if day.isToday || relative != nil {
+            result.append(NSAttributedString(string: "\n" + (relative ?? String(localized: "今天")),
+                                             attributes: [.font: small, .foregroundColor: day.isToday ? accent : quiet]))
+        }
+        return result
     }
 
     private func checkbox(done: Bool, id: String) -> NSAttributedString {

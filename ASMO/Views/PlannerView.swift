@@ -1280,7 +1280,14 @@ struct PlannerView: View {
                     homeLeading
                     Spacer()
                     Button {
-                        guard let text = pageController.textView?.textStorage else { return }
+                        guard let storage = pageController.textView?.textStorage else { return }
+                        // The days' headings are hidden in the journal layout (the date is in the margin): drawn
+                        // at heading size again here, so each day is a heading in the Markdown.
+                        let text = NSMutableAttributedString(attributedString: storage)
+                        text.enumerateAttribute(.asmoDay, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+                            guard value != nil else { return }
+                            text.addAttribute(.font, value: NSFont.systemFont(ofSize: 18, weight: .semibold), range: range)
+                        }
                         let markdown = PageMarkdown.markdown(text).replacingOccurrences(of: "-  ", with: "- ")
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(markdown, forType: .string)
