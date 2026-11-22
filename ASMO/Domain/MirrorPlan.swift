@@ -86,21 +86,65 @@ public enum MirrorAction: Equatable, Sendable {
     case deleteHere(UUID, identifier: String)
 }
 
+/// One copy of an item found in Calendar or Reminders (an item should have one; a bug or a sync hiccup can leave more).
+public struct MirrorCopy: Equatable, Sendable {
+    public var item: MirrorItem
+    public var identifier: String
+
+    public init(item: MirrorItem, identifier: String) {
+        self.item = item
+        self.identifier = identifier
+    }
+}
+
 public enum MirrorPlan {
+    /// Picks the one copy of each item that the plan works with, and names the copies to remove outright:
+    /// - an item 逐日 wants keeps one copy (the one that already matches, else the latest), wherever its day is, so a
+    ///   to-do rolled over to today moves its reminder instead of leaving yesterday's behind;
+    /// - an item 逐日 no longer wants keeps nothing from today on, and nothing unfinished in the past (the reminder
+    ///   of a deleted or rewritten to-do would sit in "Today" as overdue forever); what was finished in the past
+    ///   stays, once.
+    /// `today` is (year, month, day).
+    public static func settle(copies: [UUID: [MirrorCopy]], wanted: [UUID: MirrorItem], today: (Int, Int, Int))
+        -> (present: [UUID: (item: MirrorItem, identifier: String)], stale: [String]) {
+        func day(_ item: MirrorItem) -> Int { item.year * 10_000 + item.month * 100 + item.day }
+        let todayKey = today.0 * 10_000 + today.1 * 100 + today.2
+        var present: [UUID: (item: MirrorItem, identifier: String)] = [:]
+        var stale: [String] = []
+        for (id, all) in copies {
+            let latestFirst = all.sorted { (day($0.item), $0.identifier) > (day($1.item), $1.identifier) }
+            if let want = wanted[id] {
+                let keep = latestFirst.first { $0.item == want } ?? latestFirst[0]
+                present[id] = (keep.item, keep.identifier)
+                stale += latestFirst.filter { $0.identifier != keep.identifier }.map(\.identifier)
+                continue
+            }
+            let upcoming = latestFirst.filter { day($0.item) >= todayKey }
+            if let first = upcoming.first { present[id] = (first.item, first.identifier) }   // the plan removes it
+            stale += upcoming.dropFirst().map(\.identifier)
+            let past = latestFirst.filter { day($0.item) < todayKey }
+            let finished = past.filter { $0.item.kind == .event || $0.item.done }
+            stale += past.filter { $0.item.kind == .reminder && !$0.item.done }.map(\.identifier)
+            stale += finished.dropFirst().map(\.identifier)
+        }
+        return (present, stale)
+    }
+
     /// - Parameters:
     ///   - wanted: 逐日's items that belong in Apple's apps, by item id.
     ///   - present: what Apple's apps have now, by the item id written into each.
     ///   - written: what was last written, by item id.
-    ///   - inWindow: whether an item id is in the range of days being kept (outside it nothing is removed).
+    ///   - oneWay: items only ever written, never read back (birthdays and other yearly dates): a change made
+    ///     there is written over, and one deleted there is let go of.
     public static func actions(wanted: [UUID: MirrorItem], present: [UUID: (item: MirrorItem, identifier: String)],
-                               written: [UUID: MirrorRecord]) -> [MirrorAction] {
+                               written: [UUID: MirrorRecord], oneWay: Set<UUID> = []) -> [MirrorAction] {
         var actions: [MirrorAction] = []
         for (id, want) in wanted {
             let record = written[id]
             guard let have = present[id] else {
                 if let record, !record.released, record.item == want {
                     // Deleted in Calendar/Reminders while unchanged here: delete it here too, or (done) let go.
-                    actions.append(want.done ? .release(id) : .deleteHere(id, identifier: record.identifier))
+                    actions.append(want.done || oneWay.contains(id) ? .release(id) : .deleteHere(id, identifier: record.identifier))
                 } else if let record, record.released, record.item == want {
                     // Already let go of, and still unchanged here: nothing to do.
                 } else {
@@ -115,8 +159,20 @@ public enum MirrorPlan {
             }
             if have.item == want { continue }
             // Something differs. If 逐日 is as last written, the change was made in Apple's app: take it back.
-            if let record, record.item == want, have.item != record.item {
+            if oneWay.contains(id) {
+                actions.append(.update(id, want, identifier: have.identifier))
+            } else if let record, record.item == want, have.item != record.item {
                 actions.append(.pull(id, have.item))
+            } else if let record, have.item.done != record.item.done, want.done == record.item.done {
+                // Both changed, and what changed there is the check mark (an overdue reminder checked off on the
+                // phone before this Mac rolled it over to today): the check mark is kept, the rest is 逐日's.
+                var merged = want
+                merged.done = have.item.done
+                if merged.kind == .event {
+                    merged.title = (merged.done ? "✓ " : "") + want.plainTitle
+                }
+                actions.append(.pull(id, merged))
+                if merged != have.item { actions.append(.update(id, merged, identifier: have.identifier)) }
             } else {
                 actions.append(.update(id, want, identifier: have.identifier))
             }

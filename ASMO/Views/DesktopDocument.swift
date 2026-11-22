@@ -223,6 +223,10 @@ struct DayDocumentView: NSViewRepresentable {
     var scrolls = false
     /// Reports the day at the top of the window as the reader scrolls (the contents sidebar follows it).
     var visibleDay: ((PlanDate) -> Void)?
+    /// Called when the reader scrolls to `endsNear` or past it: the last days of the run of days after today
+    /// (more can be added below; what's further down are only the days and months with something planned).
+    var reachedEnd: (() -> Void)?
+    var endsNear: PlanDate?
 
     func makeCoordinator() -> DocCoordinator { DocCoordinator(self) }
 
@@ -671,7 +675,22 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     private var shownDay: PlanDate?
 
     /// The window moved: tell the sidebar which day is at its top (only when that day changes).
+    /// The end that was last reported (once per end).
+    private var endReportedFor: PlanDate?
+
     func scrolled() {
+        // The end is "its last days are on screen", read from what is laid out there (the document's height is an
+        // estimate until it has all been laid out).
+        if let reachedEnd = parent.reachedEnd, let near = parent.endsNear, near != endReportedFor,
+           let view, let layout = view.layoutManager, let container = view.textContainer,
+           let clip = view.enclosingScrollView?.contentView, let storage = view.textStorage, storage.length > 0 {
+            let point = NSPoint(x: view.textContainerInset.width + 1, y: clip.bounds.maxY - view.textContainerInset.height - 1)
+            let index = min(storage.length - 1, layout.characterIndex(for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil))
+            if let bottom = day(at: index), bottom >= near {
+                endReportedFor = near
+                DispatchQueue.main.async { reachedEnd() }
+            }
+        }
         guard let report = parent.visibleDay, let view, let layout = view.layoutManager, let container = view.textContainer,
               let clip = view.enclosingScrollView?.contentView, let storage = view.textStorage, storage.length > 0 else { return }
         let point = NSPoint(x: view.textContainerInset.width + 1, y: clip.bounds.minY - view.textContainerInset.height + 40)

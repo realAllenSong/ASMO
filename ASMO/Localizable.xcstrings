@@ -8076,6 +8076,22 @@
           }
         }
       }
+    },
+    "%@ %lld月%lld日": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$lld/%3$lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$lld月%3$lld日"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

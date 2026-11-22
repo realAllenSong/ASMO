@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CryptoKit
 import EventKit
 import SwiftData
 
@@ -77,7 +78,7 @@ final class CalendarMirror {
         do {
             summary = try await pass()
         } catch {
-            summary = ["state": "error", "error": error.localizedDescription]
+            summary = ["state": "error", "error": error.localizedDescription, "while": stage]
         }
         return summary
     }
@@ -89,9 +90,14 @@ final class CalendarMirror {
         var errorDescription: String? { message }
     }
 
+    /// What the pass was doing (said with an error).
+    private var stage = ""
+
     private func pass() async throws -> [String: Any] {
         guard let context else { throw Problem(message: "The store isn't open.") }
+        stage = "asking for access"
         try await authorize()
+        stage = "finding the 逐日 calendar and list"
         let calendar = try ensure(.event)
         let list = try ensure(.reminder)
         let clock = CaptureClock()
@@ -109,11 +115,13 @@ final class CalendarMirror {
         }
 
         // Made there, in the 逐日 calendar or list (on the phone, by Siri): it becomes an item here first.
+        stage = "taking in what was added in Calendar and Reminders"
         var records = loadRecords()
         let adopted = try await adopt(calendar: calendar, list: list, from: from, until: until, today: today, cal: cal,
                                       context: context, records: &records)
 
         // 逐日's side: top-level items with a day; their sub-items go in the notes.
+        stage = "reading 逐日's items"
         let tasks = try context.fetch(FetchDescriptor<TaskRecord>())
         let children = Dictionary(grouping: tasks.filter { $0.parentID != nil }) { $0.parentID! }
         var wanted: [UUID: MirrorItem] = [:]
@@ -130,48 +138,77 @@ final class CalendarMirror {
             byID[task.id] = task
         }
 
-        // Apple's side: what carries a 逐日 marker in the calendar and the list.
-        var present: [UUID: (item: MirrorItem, identifier: String)] = [:]
-        var objects: [UUID: EKCalendarItem] = [:]
-        var extras: [EKCalendarItem] = []
-        let events = store.events(matching: store.predicateForEvents(withStart: from, end: until, calendars: [calendar]))
-        for event in events {
-            guard let id = Self.marker(event) else { continue }
-            if objects[id] != nil { extras.append(event); continue }
-            present[id] = (Self.item(event, calendar: cal), event.calendarItemIdentifier)
-            objects[id] = event
-        }
-        for reminder in await reminders(in: list) {
-            guard let id = Self.marker(reminder) else { continue }
-            let item = Self.item(reminder)
-            guard let item, inWindow(item) else { continue }
-            if objects[id] != nil { extras.append(reminder); continue }
-            present[id] = (item, reminder.calendarItemIdentifier)
-            objects[id] = reminder
+        // Birthdays and other yearly dates, written only: an event at the moment the day begins where it is kept
+        // (a birthday in China on the 22nd is 11:00 on the 21st in New York), with an alert, so the phone says so.
+        var oneWay = Set<UUID>()
+        let dates = try context.fetch(FetchDescriptor<ImportantDateRecord>())
+        if !dates.isEmpty {
+            let zones = Dictionary(grouping: dates) { $0.rule.timeZoneID ?? ImportantDateTimeZone.deviceID }
+            for offset in 0..<400 {
+                guard let date = cal.date(byAdding: .day, value: offset, to: todayDate) else { continue }
+                let day = PlanDate.from(date, calendar: cal)
+                for (zoneID, kept) in zones {
+                    guard let begins = ImportantDateRule.dayBeginning(onLocal: day, zoneID: zoneID, localCalendar: cal) else { continue }
+                    for record in kept where record.falls(on: begins.there, calendar: cal) && !record.title.trimmed.isEmpty {
+                        let id = Self.occurrence(of: record.id, on: begins.there)
+                        let elsewhere = begins.minute != 0 || begins.there != day
+                        let zone = ImportantDateTimeZone.label(for: record.rule.timeZoneID)
+                        let notes = elsewhere
+                            ? String(localized: "\(zone) \(begins.there.month)月\(begins.there.day ?? 1)日") : ""
+                        wanted[id] = MirrorItem(kind: .event, title: record.title.trimmed, year: day.year, month: day.month,
+                                                day: day.day ?? 1, start: begins.minute != 0 ? begins.minute : nil,
+                                                end: begins.minute != 0 ? min(begins.minute + 30, 24 * 60 - 1) : nil,
+                                                notes: notes)
+                        oneWay.insert(id)
+                    }
+                }
+            }
         }
 
-        let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records)
-        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0, "adopted": adopted]
+        // Apple's side: every copy that carries a 逐日 marker — all the reminders in the list, and events from two
+        // months back (a to-do rolled over to today must find yesterday's reminder, not make another).
+        stage = "reading Calendar and Reminders"
+        var copies: [UUID: [MirrorCopy]] = [:]
+        var objects: [String: EKCalendarItem] = [:]
+        let back = cal.date(byAdding: .day, value: -60, to: from) ?? from
+        for event in store.events(matching: store.predicateForEvents(withStart: back, end: until, calendars: [calendar])) {
+            guard let id = Self.marker(event), objects[event.calendarItemIdentifier] == nil else { continue }
+            copies[id, default: []].append(MirrorCopy(item: Self.item(event, calendar: cal), identifier: event.calendarItemIdentifier))
+            objects[event.calendarItemIdentifier] = event
+        }
+        for reminder in await reminders(in: list) {
+            guard let id = Self.marker(reminder), let item = Self.item(reminder) else { continue }
+            copies[id, default: []].append(MirrorCopy(item: item, identifier: reminder.calendarItemIdentifier))
+            objects[reminder.calendarItemIdentifier] = reminder
+        }
+        let settled = MirrorPlan.settle(copies: copies, wanted: wanted, today: (today.year, today.month, today.day ?? 1))
+        let present = settled.present
+        let extras = settled.stale.compactMap { objects[$0] }
+
+        let actions = MirrorPlan.actions(wanted: wanted, present: present, written: records, oneWay: oneWay)
+        var counts = ["created": 0, "updated": 0, "removed": 0, "pulled": 0, "released": 0, "deleted": 0, "adopted": adopted,
+                      "tidied": extras.count]
         var deletedAny = false
         var pulledAny = false
         for action in actions {
+            stage = "writing: \(action)"
             switch action {
             case .create(let id, let item):
                 let made: EKCalendarItem = item.kind == .event ? EKEvent(eventStore: store) : EKReminder(eventStore: store)
                 made.calendar = item.kind == .event ? calendar : list
                 made.url = URL(string: "asmo://mirror/\(id.uuidString)")
-                write(item, to: made, calendar: cal, new: true)
+                write(item, to: made, calendar: cal, new: true, occasion: oneWay.contains(id))
                 try save(made)
                 records[id] = MirrorRecord(item: item, identifier: made.calendarItemIdentifier)
                 counts["created", default: 0] += 1
-            case .update(let id, let item, _):
-                guard let existing = objects[id] else { continue }
-                write(item, to: existing, calendar: cal, new: false)
+            case .update(let id, let item, let identifier):
+                guard let existing = objects[identifier] else { continue }
+                write(item, to: existing, calendar: cal, new: false, occasion: oneWay.contains(id))
                 try save(existing)
                 records[id] = MirrorRecord(item: item, identifier: existing.calendarItemIdentifier)
                 counts["updated", default: 0] += 1
-            case .remove(let id, _, _):
-                if let existing = objects[id] { try remove(existing) }
+            case .remove(let id, let identifier, _):
+                if let existing = objects[identifier] { try remove(existing) }
                 if wanted[id] == nil { records[id] = nil }
                 counts["removed", default: 0] += 1
             case .pull(let id, let item):
@@ -198,7 +235,9 @@ final class CalendarMirror {
                 counts["deleted", default: 0] += 1
             }
         }
+        stage = "removing old copies"
         for extra in extras { try remove(extra) }
+        stage = "saving"
         let wroteThere = actions.contains { action in
             switch action {
             case .create, .update, .remove: return true
@@ -211,8 +250,9 @@ final class CalendarMirror {
         }
         if pulledAny || deletedAny { try context.save() }
         saveRecords(records)
-        return ["state": "ok", "calendar": calendar.title, "list": list.title, "items": wanted.count,
-                "events": wanted.values.filter { $0.kind == .event }.count,
+        return ["state": "ok", "calendar": calendar.title, "list": list.title, "items": wanted.count - oneWay.count,
+                "dates": oneWay.count,
+                "events": wanted.filter { $0.value.kind == .event && !oneWay.contains($0.key) }.count,
                 "reminders": wanted.values.filter { $0.kind == .reminder }.count]
             .merging(counts.mapValues { $0 as Any }) { $1 }
     }
@@ -313,7 +353,17 @@ final class CalendarMirror {
         else if let reminder = item as? EKReminder { try store.remove(reminder, commit: false) }
     }
 
-    private func write(_ item: MirrorItem, to target: EKCalendarItem, calendar cal: Calendar, new: Bool) {
+    /// One id for each time a yearly date comes round (the date's id and the day it falls on, mixed).
+    private static func occurrence(of id: UUID, on day: PlanDate) -> UUID {
+        let digest = SHA256.hash(data: Data((id.uuidString + "|" + day.key).utf8))
+        var bytes = Array(digest.prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
+    private func write(_ item: MirrorItem, to target: EKCalendarItem, calendar cal: Calendar, new: Bool, occasion: Bool = false) {
         target.title = item.title
         target.notes = item.notes.isEmpty ? nil : item.notes
         if let event = target as? EKEvent {
@@ -325,6 +375,8 @@ final class CalendarMirror {
             event.endDate = cal.date(from: day).flatMap { cal.date(byAdding: .minute, value: end, to: $0) }
             // A new event alerts at its time, like one made in Calendar would by default.
             if new, item.start != nil, !item.done { event.alarms = [EKAlarm(relativeOffset: 0)] }
+            // A birthday that begins with the local day: said at nine that morning.
+            if new, occasion, item.start == nil { event.alarms = [EKAlarm(relativeOffset: 9 * 3600)] }
         } else if let reminder = target as? EKReminder {
             let due = DateComponents(calendar: cal, year: item.year, month: item.month, day: item.day)
             reminder.startDateComponents = due

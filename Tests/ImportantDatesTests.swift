@@ -86,4 +86,53 @@ struct ImportantDatesTests {
         now = try #require(PlanDate(year: 2026, month: 11, day: 23, hour: 0).date(in: shanghai))
         #expect(rule.suggestedGreeting(on: birthday, after: now, localCalendar: clock.calendar) == nil)
     }
+
+    // MARK: When the day begins, seen from here
+
+    private func calendar(_ zone: String) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        return calendar
+    }
+
+    @Test func aChinaBirthdayBeginsTheMorningBeforeInNewYork() {
+        let mom = ImportantDateRule(month: 11, day: 22, timeZoneID: "Asia/Shanghai")
+        let newYork = calendar("America/New_York")
+        let start = mom.start(onLocal: PlanDate(year: 2026, month: 11, day: 21), localCalendar: newYork)
+        #expect(start?.minute == 11 * 60)                       // 00:00 in Beijing is 11:00 EST
+        #expect(start?.there == PlanDate(year: 2026, month: 11, day: 22))
+        #expect(mom.start(onLocal: PlanDate(year: 2026, month: 11, day: 22), localCalendar: newYork) == nil)
+        #expect(mom.start(onLocal: PlanDate(year: 2026, month: 11, day: 20), localCalendar: newYork) == nil)
+    }
+
+    @Test func inSummerTheSameBirthdayBeginsAtNoon() {
+        let july = ImportantDateRule(month: 7, day: 12, timeZoneID: "Asia/Shanghai")
+        let start = july.start(onLocal: PlanDate(year: 2026, month: 7, day: 11), localCalendar: calendar("America/New_York"))
+        #expect(start?.minute == 12 * 60)                       // daylight time: 12 hours apart
+    }
+
+    @Test func inItsOwnZoneADateBeginsWithTheDay() {
+        let mom = ImportantDateRule(month: 11, day: 22, timeZoneID: "Asia/Shanghai")
+        let start = mom.start(onLocal: PlanDate(year: 2026, month: 11, day: 22), localCalendar: calendar("Asia/Shanghai"))
+        #expect(start?.minute == 0)
+        let device = ImportantDateRule(month: 1, day: 6)
+        #expect(device.start(onLocal: PlanDate(year: 2027, month: 1, day: 6), localCalendar: calendar("America/New_York"))?.minute == 0)
+    }
+
+    @Test func aNewYorkBirthdayBeginsInTheAfternoonInChina() {
+        let friend = ImportantDateRule(month: 11, day: 22, timeZoneID: "America/New_York")
+        let start = friend.start(onLocal: PlanDate(year: 2026, month: 11, day: 22), localCalendar: calendar("Asia/Shanghai"))
+        #expect(start?.minute == 13 * 60)
+    }
+
+    @Test func aLunarBirthdayIsFoundByItsDayThere() {
+        // 农历七月三十 2027 is 31 August 2027 (the seventh month has 30 days that year).
+        let grandma = ImportantDateRule(month: 7, day: 30, system: .lunar, timeZoneID: "Asia/Shanghai")
+        let newYork = calendar("America/New_York")
+        let first = newYork.date(from: DateComponents(year: 2027, month: 1, day: 1, hour: 12))!
+        let year = (0..<365).map { PlanDate.from(newYork.date(byAdding: .day, value: $0, to: first)!, calendar: newYork) }
+        let found = year.filter { grandma.start(onLocal: $0, localCalendar: newYork) != nil }
+        #expect(found.count == 1)
+        #expect(found.first?.month == 8 || found.first?.month == 9)
+    }
 }

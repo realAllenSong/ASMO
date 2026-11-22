@@ -97,4 +97,65 @@ struct MirrorPlanTests {
                                          written: [id: MirrorRecord(item: reminder, identifier: "r1")])
         #expect(actions == [.pull(id, checked)])
     }
+
+    // MARK: One copy of each item
+
+    @Test func rolledOverReminderMovesInsteadOfBeingMadeAgain() {
+        // Yesterday's reminder is still there (19th); the to-do was rolled over to today (the 20th).
+        let yesterday = task(hour: nil, day: 19), today = task(hour: nil, day: 20)
+        let settled = MirrorPlan.settle(copies: [id: [MirrorCopy(item: yesterday, identifier: "r1")]], wanted: [id: today], today: (2026, 11, 20))
+        #expect(settled.stale.isEmpty)
+        let actions = MirrorPlan.actions(wanted: [id: today], present: settled.present,
+                                         written: [id: MirrorRecord(item: yesterday, identifier: "r1")])
+        #expect(actions == [.update(id, today, identifier: "r1")])
+    }
+
+    @Test func extraCopiesOfAWantedItemAreRemoved() {
+        let today = task(hour: nil, day: 20)
+        let copies = [17, 18, 19, 20].map { MirrorCopy(item: task(hour: nil, day: $0), identifier: "r\($0)") }
+        let settled = MirrorPlan.settle(copies: [id: copies], wanted: [id: today], today: (2026, 11, 20))
+        #expect(settled.present[id]?.identifier == "r20")
+        #expect(Set(settled.stale) == ["r17", "r18", "r19"])
+    }
+
+    @Test func unfinishedPastReminderOfAnItemNoLongerThereIsRemoved() {
+        let copies = [MirrorCopy(item: task(hour: nil, day: 17), identifier: "open"),
+                      MirrorCopy(item: task(hour: nil, done: true, day: 16), identifier: "done"),
+                      MirrorCopy(item: task(hour: nil, done: true, day: 15), identifier: "done-twice")]
+        let settled = MirrorPlan.settle(copies: [id: copies], wanted: [:], today: (2026, 11, 20))
+        #expect(settled.present.isEmpty)
+        #expect(Set(settled.stale) == ["open", "done-twice"])
+    }
+
+    @Test func pastEventsStay() {
+        let settled = MirrorPlan.settle(copies: [id: [MirrorCopy(item: task(day: 10), identifier: "e1")]], wanted: [:], today: (2026, 11, 20))
+        #expect(settled.present.isEmpty && settled.stale.isEmpty)
+    }
+
+    @Test func upcomingCopyOfAnItemNoLongerWantedIsLeftToThePlan() {
+        let settled = MirrorPlan.settle(copies: [id: [MirrorCopy(item: task(hour: nil, day: 25), identifier: "r1")]], wanted: [:], today: (2026, 11, 20))
+        #expect(settled.stale.isEmpty)
+        #expect(MirrorPlan.actions(wanted: [:], present: settled.present, written: [:]) == [.remove(id, identifier: "r1", kind: .reminder)])
+    }
+
+    @Test func checkedOffOnThePhoneSurvivesTheRollOver() {
+        // Written for the 19th; checked off on the phone; then this Mac rolled the (still open) to-do to the 20th.
+        let written = task(hour: nil, day: 19), checked = task(hour: nil, done: true, day: 19), rolled = task(hour: nil, day: 20)
+        let actions = MirrorPlan.actions(wanted: [id: rolled], present: [id: (checked, "r1")],
+                                         written: [id: MirrorRecord(item: written, identifier: "r1")])
+        let done = task(hour: nil, done: true, day: 20)
+        #expect(actions == [.pull(id, done), .update(id, done, identifier: "r1")])
+    }
+
+    // MARK: Written only (birthdays)
+
+    @Test func oneWayItemsAreWrittenOverAndLetGo() {
+        let birthday = MirrorItem(kind: .event, title: "妈生日", year: 2026, month: 11, day: 21, start: 660, end: 690)
+        var moved = birthday
+        moved.start = 720
+        let record = [id: MirrorRecord(item: birthday, identifier: "e1")]
+        #expect(MirrorPlan.actions(wanted: [id: birthday], present: [id: (moved, "e1")], written: record, oneWay: [id])
+                == [.update(id, birthday, identifier: "e1")])
+        #expect(MirrorPlan.actions(wanted: [id: birthday], present: [:], written: record, oneWay: [id]) == [.release(id)])
+    }
 }

@@ -179,6 +179,7 @@ final class AgentCommands {
         #endif
         case "dates": return ["dates": try dates().map(json)]
         case "date-add": return try addDate(body)
+        case "date-set": return try setDate(body)
         case "date-remove": return try removeDate(body)
         case "undo": return try undo()
         default: throw Failure(message: "Unknown command \"\(command)\".")
@@ -214,8 +215,17 @@ final class AgentCommands {
             if !written.isEmpty { answer["page"] = written }
         }
         #endif
-        let occasions = try dates().filter { $0.rule.matches(day, calendar: clock.calendar) }
-        if !occasions.isEmpty { answer["dates"] = occasions.map(json) }
+        // A date kept in another time zone is on the local day it begins there ("begins": the local time).
+        let occasions: [[String: Any]] = try dates().compactMap { record in
+            guard let start = record.start(onLocal: day, calendar: clock.calendar) else { return nil }
+            var row = json(record)
+            if start.minute != 0 || start.there != day {
+                row["begins"] = String(format: "%02d:%02d", start.minute / 60, start.minute % 60)
+                row["dayThere"] = start.there.key
+            }
+            return row
+        }
+        if !occasions.isEmpty { answer["dates"] = occasions }
         let month = PlanDate(year: day.year, month: day.month)
         let monthPlans = all.filter { $0.schedule == month }
         if !monthPlans.isEmpty { answer["monthPlans"] = monthPlans.map { json($0) } }
@@ -613,7 +623,55 @@ final class AgentCommands {
                                   "on": String(format: "%02d-%02d", date.month, date.day),
                                   "calendar": date.systemRaw]
         if let year = date.year { row["year"] = year }
+        // Where the day is counted: a birthday is in China time unless set otherwise; "device" follows this Mac.
+        row["zone"] = date.rule.timeZoneID ?? ImportantDateTimeZone.deviceID
+        if date.rule.system == .lunar, let month = date.alternativeMonth, let day = date.alternativeDay {
+            row["also"] = String(format: "%02d-%02d", month, day)
+        }
         return row
+    }
+
+    /// "Asia/Shanghai", "America/New_York", … or "device" (wherever this Mac is).
+    private func zone(_ body: [String: Any]) throws -> String?? {
+        guard let text = (body["zone"] as? String)?.trimmed, !text.isEmpty else { return nil }
+        if text == ImportantDateTimeZone.deviceID { return .some(ImportantDateTimeZone.deviceID) }
+        guard TimeZone(identifier: text) != nil else {
+            throw Failure(message: "\"zone\" is a time zone name like Asia/Shanghai or America/New_York, or \"device\".")
+        }
+        return .some(text)
+    }
+
+    private func setDate(_ body: [String: Any]) throws -> [String: Any] {
+        guard let text = (body["id"] as? String)?.lowercased(), text.count >= 4 else { throw Failure(message: "A date \"id\" is needed.") }
+        let matches = try dates().filter { $0.id.uuidString.lowercased().hasPrefix(text) }
+        guard matches.count == 1 else { throw Failure(message: matches.isEmpty ? "No date with id \(text)." : "Several dates start with \(text).") }
+        let date = matches[0]
+        let before = (title: date.title, rule: date.rule, zone: date.timeZoneID, kind: date.kind)
+        if let title = (body["title"] as? String)?.trimmed, !title.isEmpty { date.title = title }
+        if let on = body["on"] as? String {
+            let parts = on.split(separator: "-").map { Int($0) }
+            guard parts.count == 2, let month = parts[0], let day = parts[1], (1...12).contains(month), (1...31).contains(day) else {
+                throw Failure(message: "\"on\" is the month and day, MM-DD.")
+            }
+            date.month = month
+            date.day = day
+        }
+        if let lunar = body["lunar"] as? Bool { date.systemRaw = (lunar ? ImportantDateSystem.lunar : .gregorian).rawValue }
+        if let raw = body["kind"] as? String {
+            guard let kind = ImportantDateKind(rawValue: raw) else { throw Failure(message: "\"kind\" is birthday, anniversary or holiday.") }
+            date.kind = kind
+        }
+        if let zone = try zone(body) { date.timeZoneID = zone }
+        let id = date.id
+        remember("changed the date 「\(date.title)」") { [self] in
+            for date in try dates() where date.id == id {
+                date.title = before.title
+                date.kind = before.kind
+                date.rule = before.rule
+                date.timeZoneID = before.zone
+            }
+        }
+        return ["date": json(date)]
     }
 
     private func addDate(_ body: [String: Any]) throws -> [String: Any] {
@@ -629,6 +687,7 @@ final class AgentCommands {
         let system: ImportantDateSystem = body["lunar"] as? Bool == true ? .lunar : .gregorian
         let year = body["year"] as? Int ?? (body["year"] as? String).flatMap { Int($0) }
         let record = ImportantDateRecord(title: title, kind: kind, rule: ImportantDateRule(month: month, day: day, year: year, system: system))
+        if let zone = try zone(body) { record.timeZoneID = zone }
         context.insert(record)
         let id = record.id
         remember("added the date 「\(title)」") { [self] in

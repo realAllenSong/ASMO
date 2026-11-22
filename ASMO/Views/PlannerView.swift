@@ -1125,7 +1125,9 @@ struct PlannerView: View {
         #endif
         // Read through lastKnownToday so midnight passing redraws the document.
         let today = max(lastKnownToday, clock.today)
-        var days = Set((0...14).compactMap { clock.offset(days: $0) })
+        // Every day ahead is there to write on, empty or not: six weeks to begin with, further as the reader
+        // scrolls to the end or jumps to a later month.
+        var days = Set((0...paperAheadDays).compactMap { clock.offset(days: $0) })
         for task in tasks where !task.calendarLinked {
             if let day = task.schedule?.dayOnly { days.insert(day) }
         }
@@ -1135,15 +1137,6 @@ struct PlannerView: View {
         }
         // History days with something written (an imported "11.3:" with nothing after it is just a date).
         for (day, entries) in archivedDays where entries.contains(where: { !$0.entry.body.trimmed.isEmpty }) { days.insert(day) }
-        let calendar = clock.calendar
-        let gregorian = Set(importantDates.filter { $0.rule.system == .gregorian }.map { $0.rule.month * 100 + $0.rule.day })
-        let lunar = importantDates.filter { $0.rule.system != .gregorian }
-        for offset in 15...31 {
-            guard let day = clock.offset(days: offset) else { continue }
-            if gregorian.contains(day.month * 100 + (day.day ?? 0)) || lunar.contains(where: { $0.rule.matches(day, calendar: calendar) }) {
-                days.insert(day)
-            }
-        }
         days.insert(today)
         // The past is shown back to a point (a long page is slow to edit); 更早的记录 moves the point back.
         let cutoff = clock.offset(days: -paperHistory) ?? today
@@ -1168,6 +1161,12 @@ struct PlannerView: View {
             if let first = months[key], first <= day { continue }
             months[key] = day
         }
+        // The next two years are there to jump to, written in or not.
+        for offset in 0...24 {
+            let total = today.year * 12 + today.month - 1 + offset
+            let key = (total / 12) * 100 + total % 12 + 1
+            if months[key] == nil { months[key] = PlanDate(year: total / 12, month: total % 12 + 1, day: 1) }
+        }
         let list = months.keys.sorted().compactMap { months[$0] }
         if list != paperContentsModel.months {
             let model = paperContentsModel
@@ -1178,6 +1177,17 @@ struct PlannerView: View {
 
     /// Past days on the paper (earlier months are reached from the contents sidebar).
     private let paperHistory = 60
+    /// Days after today on the paper: six weeks, plus what scrolling to the end or jumping ahead has added.
+    @State private var paperAhead = 0
+    private static let paperAheadBase = 45
+    private static let paperAheadLimit = 731
+    private var paperAheadDays: Int { min(Self.paperAheadLimit, Self.paperAheadBase + paperAhead) }
+
+    /// The reader reached the end of the document: another month of days is added below.
+    private func extendPaper() {
+        guard paperAheadDays < Self.paperAheadLimit else { return }
+        paperAhead += 31
+    }
     /// The sidebar's months and the month on screen: observed by the sidebar only, so scrolling past a month
     /// never redraws the planner.
     @State private var paperContentsModel = PaperContentsModel()
@@ -1232,7 +1242,14 @@ struct PlannerView: View {
     }
 
     private func jump(to day: PlanDate) {
-        paperFocus = day == clock.today ? nil : day.dayOnly
+        let today = clock.today
+        paperFocus = day == today ? nil : day.dayOnly
+        if day == today {
+            paperAhead = 0
+        } else if let delta = dayDelta(today, day), delta > 0 {
+            // A later day: the document runs on to the end of its month (and a little past), with no gap.
+            paperAhead = max(paperAhead, min(Self.paperAheadLimit, delta + 41) - Self.paperAheadBase)
+        }
         paperJump += 1
     }
 
@@ -1288,7 +1305,7 @@ struct PlannerView: View {
                                 scrolls: true, visibleDay: { [paperContentsModel] day in
                                     let month = PlanDate(year: day.year, month: day.month)
                                     if paperContentsModel.visible != month { paperContentsModel.visible = month }
-                                })
+                                }, reachedEnd: { extendPaper() }, endsNear: clock.offset(days: paperAheadDays - 3))
             }
         }
     }
@@ -2931,6 +2948,8 @@ struct PlannerView: View {
         var reminders: [PlanDate: [SystemTask]] = [:]
         var promoted = Set<String>()
         var edits: [String: String] = [:]
+        /// Changes when the important dates or the time zone do (what `occasions(on:)` remembers is for one value).
+        var occasionSignature = 0
         /// Important dates are shown from this day on.
         var since = PlanDate(year: 1, month: 1, day: 1)
     }
@@ -2944,6 +2963,14 @@ struct PlannerView: View {
             if record.rule.system == .gregorian { index.gregorian[record.rule.month * 100 + record.rule.day, default: []].append(record) }
             else { index.lunar.append(record) }
         }
+        var hasher = Hasher()
+        hasher.combine(clock.calendar.timeZone.identifier)
+        for record in importantDates {
+            hasher.combine(record.id); hasher.combine(record.month); hasher.combine(record.day); hasher.combine(record.systemRaw)
+            hasher.combine(record.timeZoneID); hasher.combine(record.kindRaw)
+            hasher.combine(record.alternativeMonth); hasher.combine(record.alternativeDay)
+        }
+        index.occasionSignature = hasher.finalize()
         index.marks = Dictionary(routineMarks.map { ($0.routineID.uuidString + "|" + $0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
         index.notes = Dictionary(notes.filter { !$0.body.trimmed.isEmpty }.map { ($0.dayKey, $0) }, uniquingKeysWith: { first, _ in first })
         // Only the pages of the days being drawn.
@@ -2963,6 +2990,32 @@ struct PlannerView: View {
         index.edits = Dictionary(journalEdits.map { ($0.recordKey, $0.body) }, uniquingKeysWith: { newest, _ in newest })
         index.since = clock.offset(days: -60) ?? clock.today
         return index
+    }
+
+    /// When each important date begins on each local day, worked out once per day.
+    private final class OccasionStarts {
+        var signature = 0
+        var byDay: [PlanDate: [(id: UUID, start: ImportantDateStart)]] = [:]
+    }
+    @State private var occasionStarts = OccasionStarts()
+
+    /// The important dates that begin on this local day (in their own time zones), with when.
+    private func occasions(on day: PlanDate, signature: Int) -> [(record: ImportantDateRecord, start: ImportantDateStart)] {
+        let box = occasionStarts
+        if box.signature != signature {
+            box.signature = signature
+            box.byDay = [:]
+        }
+        let found: [(id: UUID, start: ImportantDateStart)]
+        if let known = box.byDay[day] {
+            found = known
+        } else {
+            let calendar = clock.calendar
+            found = importantDates.compactMap { record in record.start(onLocal: day, calendar: calendar).map { (record.id, $0) } }
+            box.byDay[day] = found
+        }
+        guard !found.isEmpty else { return [] }
+        return found.compactMap { entry in importantDates.first { $0.id == entry.id }.map { ($0, entry.start) } }
     }
 
     private func documentDays(_ days: [PlanDate]) -> [DocDay] {
@@ -3018,11 +3071,17 @@ struct PlannerView: View {
         }
         var occasionTitles = Set<String>()
         // Birthdays and anniversaries from now on (on days of the old history they'd only be noise, and lunar
-        // dates cost a calendar conversion each).
+        // dates cost a calendar conversion each). A date kept in another time zone shows on the local day it
+        // begins there, with the local time: a birthday in China starts at 11:00 the morning before in New York.
         let recent = day >= index.since
-        let candidates = recent ? (index.gregorian[day.month * 100 + (day.day ?? 0)] ?? []) + index.lunar : []
-        for record in candidates where record.rule.matches(day, calendar: calendar) && occasionTitles.insert(record.title).inserted {
-            top.append((-1, .distantPast, [DocLine(kind: .occasion, id: "occasion-\(record.id)", title: record.title)]))
+        for (record, start) in recent ? occasions(on: day, signature: index.occasionSignature) : []
+            where occasionTitles.insert(record.title).inserted {
+            let elsewhere = start.minute != 0 || start.there != day
+            let zone = ImportantDateTimeZone.label(for: record.rule.timeZoneID)
+            top.append((-1, .distantPast, [DocLine(
+                kind: .occasion, id: "occasion-\(record.id)", time: start.minute != 0 ? PlannerClockTime.label(start.minute) : nil,
+                title: record.title,
+                tag: elsewhere ? String(localized: "\(zone) \(start.there.month)月\(start.there.day ?? 1)日") : nil)]))
         }
         // Routines show on every day they repeat, the same as the day at rest (逐日 / frozen).
         for instance in routineInstances(on: day, marks: index.marks) {
@@ -3112,6 +3171,11 @@ struct PlannerView: View {
                 }
             },
             editTag: { id in
+                // A date's "中国时间 11月22日": its day and time zone are changed in the date's own editor.
+                if id.hasPrefix("occasion-"), let record = importantDates.first(where: { "occasion-\($0.id)" == id }) {
+                    editOccasion(record)
+                    return
+                }
                 let routineID = id.split(separator: "|").first.map(String.init)
                 if let routine = routines.first(where: { $0.id.uuidString == routineID }) { editingRoutine = routine }
             },

@@ -118,6 +118,41 @@ struct ImportantDateRule: Codable, Hashable, Sendable {
     }
 }
 
+/// A yearly date seen from where the reader is: the day it is there, and when that day begins here.
+struct ImportantDateStart: Equatable, Sendable {
+    /// The date in the date's own time zone.
+    let there: PlanDate
+    /// Minutes after local midnight at which that day begins there (0 when it begins with the local day).
+    let minute: Int
+    /// The moment it begins.
+    let instant: Date
+}
+
+extension ImportantDateRule {
+    /// Whether this date's day begins during the local day `day`, and when. A birthday kept in China time is the
+    /// 22nd there from 11:00 on the 21st in New York: that is when to send wishes, so that is where it shows.
+    func start(onLocal day: PlanDate, localCalendar: Calendar) -> ImportantDateStart? {
+        guard let begins = Self.dayBeginning(onLocal: day, zoneID: timeZoneID, localCalendar: localCalendar),
+              matches(begins.there, calendar: localCalendar) else { return nil }
+        return begins
+    }
+
+    /// The day, in the time zone `zoneID`, whose first moment falls inside the local day `day` (there is one,
+    /// except across a clock change): what any date kept in that zone is checked against.
+    static func dayBeginning(onLocal day: PlanDate, zoneID: String?, localCalendar: Calendar) -> ImportantDateStart? {
+        guard day.day != nil, let zone = ImportantDateTimeZone.resolve(zoneID, device: localCalendar.timeZone),
+              let noon = day.dayOnly.date(in: localCalendar) else { return nil }
+        let localStart = localCalendar.startOfDay(for: noon)
+        guard let localEnd = localCalendar.date(byAdding: .day, value: 1, to: localStart) else { return nil }
+        var there = localCalendar
+        there.timeZone = zone
+        let begins = there.startOfDay(for: localEnd.addingTimeInterval(-1))
+        guard begins >= localStart else { return nil }
+        return ImportantDateStart(there: PlanDate.from(begins, calendar: there),
+                                  minute: Int(begins.timeIntervalSince(localStart) / 60), instant: begins)
+    }
+}
+
 struct BirthdayGreetingTime: Equatable, Sendable {
     let instant: Date
     let recipient: PlanDate

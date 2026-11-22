@@ -134,6 +134,21 @@ final class ImportantDateRecord {
         }
     }
 
+    /// When this date begins on the local day `day` (nil when it doesn't): by its rule, or by the Gregorian date
+    /// written next to a lunar one ("11.19 奶奶（农历七月三十）" is kept on both).
+    func start(onLocal day: PlanDate, calendar: Calendar) -> ImportantDateStart? {
+        guard let begins = ImportantDateRule.dayBeginning(onLocal: day, zoneID: rule.timeZoneID, localCalendar: calendar),
+              falls(on: begins.there, calendar: calendar) else { return nil }
+        return begins
+    }
+
+    /// Whether `there`, a day in this date's own time zone, is the date.
+    func falls(on there: PlanDate, calendar: Calendar) -> Bool {
+        let rule = self.rule
+        if rule.matches(there, calendar: calendar) { return true }
+        return rule.system == .lunar && alternativeMonth == there.month && alternativeDay == there.day && alternativeDay != nil
+    }
+
     init(title: String, kind: ImportantDateKind, rule: ImportantDateRule, original: String = "",
          importKey: String? = nil, alternative: ImportantDateRule? = nil) {
         self.title = title

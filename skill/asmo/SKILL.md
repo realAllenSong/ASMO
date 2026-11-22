@@ -102,9 +102,18 @@ asmo page import --replace --file pages.json   # rewrite those days (--append ad
 
 ```bash
 asmo dates
-asmo date add "Mum's birthday" --on 03-08 --year 1968 --lunar   # --kind birthday | anniversary | holiday
+asmo date add "Mum's birthday" --on 03-08 --lunar               # --kind birthday | anniversary | holiday
+asmo date add "Li's birthday" --on 06-17 --zone America/New_York
+asmo date set 4778 --zone Asia/Shanghai                         # also --title, --on, --kind, --lunar
 asmo date rm 4778
 ```
+
+- A date comes back every year. `--year YYYY` makes it a one-time date in that year only; it is not a birth year.
+- `--zone` is where the day is counted (a time zone name, or `device` for wherever this Mac is). Birthdays are in
+  China time unless set otherwise. A date kept in another zone shows on the local day and time it begins there:
+  a birthday on the 22nd in China is at 11:00 on the 21st in New York. `asmo day` gives that as `"begins"` and
+  `"dayThere"`. Each one is also put in Apple Calendar at that moment, with an alert.
+- A lunar date imported together with a Gregorian one (`"also": "11-19"`) shows on both.
 
 ## Routines (repeating items)
 

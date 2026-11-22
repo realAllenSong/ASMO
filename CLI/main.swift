@@ -48,8 +48,14 @@ Routines
 
 Important dates (birthdays, anniversaries, holidays; every year)
   asmo dates
-  asmo date add TITLE --on MM-DD [--year YYYY] [--kind birthday|anniversary|holiday] [--lunar]
+  asmo date add TITLE --on MM-DD [--year YYYY] [--kind birthday|anniversary|holiday] [--lunar] [--zone ZONE]
+  asmo date set ID [--title T] [--on MM-DD] [--kind …] [--lunar] [--zone ZONE|device]
   asmo date rm ID
+                                     --year makes it a one-time date in that year only (not a birth year).
+                                     ZONE is where the day is counted (Asia/Shanghai, America/New_York, …); birthdays
+                                     are in China time unless set. A date in another zone shows on the local day and
+                                     time it begins there (a China birthday on the 22nd: 11:00 on the 21st in New
+                                     York), and is put in Apple Calendar at that moment with an alert.
 
   asmo undo                          take back the last change made with asmo (repeat for earlier ones)
   asmo mirror [on|off]               keep Apple Calendar (timed items) and Reminders (day items) in step
@@ -260,10 +266,17 @@ let tools: [Tool] = [
     Tool(name: "stop_routine", about: "End a routine from today on.", properties: ["id": stringType], required: ["id"], request: passing("routine-stop")),
     Tool(name: "important_dates", about: "Birthdays, anniversaries and holidays the user keeps.", properties: [:], request: passing("dates")),
     Tool(name: "add_important_date", about: "Add a birthday, anniversary or holiday that comes back every year.",
-         properties: ["title": stringType, "on": described("string", "MM-DD"), "year": described("integer", "The year it first happened, if known"),
+         properties: ["title": stringType, "on": described("string", "MM-DD"), "year": described("integer", "Only for a one-time date: the single year it is shown in. Leave out for a date that comes back every year (it is not a birth year)"),
                       "kind": ["type": "string", "enum": ["birthday", "anniversary", "holiday"]],
-                      "lunar": described("boolean", "The date is in the Chinese lunar calendar")],
+                      "lunar": described("boolean", "The date is in the Chinese lunar calendar"),
+                      "zone": described("string", "Time zone the day is counted in, e.g. Asia/Shanghai; \"device\" follows this Mac. Birthdays default to China time")],
          required: ["title", "on"], request: passing("date-add")),
+    Tool(name: "update_important_date", about: "Change an important date's title, day, kind or the time zone its day is counted in.",
+         properties: ["id": stringType, "title": stringType, "on": described("string", "MM-DD"),
+                      "kind": ["type": "string", "enum": ["birthday", "anniversary", "holiday"]],
+                      "lunar": described("boolean", "The date is in the Chinese lunar calendar"),
+                      "zone": described("string", "Time zone name, e.g. Asia/Shanghai, or \"device\"")],
+         required: ["id"], request: passing("date-set")),
     Tool(name: "remove_important_date", about: "Remove an important date.", properties: ["id": stringType], required: ["id"], request: passing("date-remove")),
     Tool(name: "undo", about: "Take back the last change made through these tools (call again for earlier ones).", properties: [:], request: passing("undo")),
 ]
@@ -505,13 +518,18 @@ do {
     case "date":
         switch rest.first {
         case "add":
-            guard rest.count > 1, flag("on") != nil else { fail("asmo date add TITLE --on MM-DD [--year YYYY] [--kind birthday|anniversary|holiday] [--lunar]") }
+            guard rest.count > 1, flag("on") != nil else { fail("asmo date add TITLE --on MM-DD [--year YYYY] [--kind birthday|anniversary|holiday] [--lunar] [--zone ZONE]") }
             request = ["cmd": "date-add", "title": rest.dropFirst().joined(separator: " "), "lunar": flags["--lunar"] != nil]
-            put(["on": "on", "year": "year", "kind": "kind"])
+            put(["on": "on", "year": "year", "kind": "kind", "zone": "zone"])
+        case "set":
+            guard rest.count > 1 else { fail("asmo date set ID [--title T] [--on MM-DD] [--kind …] [--lunar] [--zone ZONE|device]") }
+            request = ["cmd": "date-set", "id": rest[1]]
+            if flags["--lunar"] != nil { request["lunar"] = true }
+            put(["title": "title", "on": "on", "kind": "kind", "zone": "zone"])
         case "rm":
             guard rest.count > 1 else { fail("asmo date rm ID") }
             request = ["cmd": "date-remove", "id": rest[1]]
-        default: fail("asmo date add|rm … See: asmo help")
+        default: fail("asmo date add|set|rm … See: asmo help")
         }
     default: fail("Unknown command \"\(command)\". See: asmo help")
     }
