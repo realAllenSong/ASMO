@@ -9,6 +9,8 @@ final class PageController: ObservableObject {
     weak var textView: NSTextView?
     @Published var recording = false
     @Published var isEditing = false
+    /// The style of the line the caret is on in a note: 0 text, 1–6 a heading (the style menu shows it).
+    @Published var noteStyle = 0
 
     var isEmpty: Bool { (textView?.string.trimmed ?? "").isEmpty }
 
@@ -57,6 +59,52 @@ final class PageController: ObservableObject {
 
     /// A note is Markdown: the toolbar writes its marks instead of formatting.
     private var note: NoteTextView? { textView as? NoteTextView }
+
+    // A note's own tools (Markdown that Obsidian reads the same way).
+
+    func noteHeading(_ level: Int) {
+        guard let note else { return }
+        note.window?.makeFirstResponder(note)
+        note.setHeading(level)
+    }
+
+    func noteLine(_ prefix: String) { note?.linePrefix(prefix) }
+
+    func noteCode() {
+        guard let note else { return }
+        if note.selectedRange().length > 0, !(note.string as NSString).substring(with: note.selectedRange()).contains("\n") {
+            note.wrap("`"); return
+        }
+        note.insertBlock("```\n\n```\n", caret: 4)
+    }
+
+    func noteFormula() {
+        guard let note else { return }
+        if note.selectedRange().length > 0 { note.wrap("$"); return }
+        note.insertBlock("$$\n\n$$\n", caret: 3)
+    }
+
+    func noteTable() {
+        let columns = [String(localized: "列 1"), String(localized: "列 2"), String(localized: "列 3")]
+        note?.insertBlock("| " + columns.joined(separator: " | ") + " |\n| --- | --- | --- |\n|  |  |  |\n",
+                          caret: ("| " + columns.joined(separator: " | ") + " |\n| --- | --- | --- |\n| " as NSString).length)
+    }
+
+    /// Opens a note or drawing (set by the window).
+    var openNote: ((URL) -> Void)?
+
+    /// A new drawing, shown in the note (![[…]]) and opened to draw in.
+    func noteDrawing() {
+        guard let note else { return }
+        guard let made = try? NotesLibrary.shared.createDrawing() else { NSSound.beep(); return }
+        note.insertBlock("![[\(NotesLibrary.title(of: made)).excalidraw]]\n", caret: 0)
+        note.coordinator?.save()
+        openNote?(made)
+    }
+
+    func noteCallout() {
+        note?.insertBlock("> [!note] \n> \n", caret: 10)
+    }
 
     func toggleBold() { if let note { note.wrap("**") } else { toggleTrait(.boldFontMask) } }
     func toggleItalic() { if let note { note.wrap("*") } else { toggleTrait(.italicFontMask) } }
@@ -682,8 +730,40 @@ struct PageToolbar: View {
     /// A button that turns the page's lines into to-dos now; nil shows none (the Mac does it quietly when the page
     /// closes, by the date and time rules).
     var organize: (() -> Void)? = nil
+    /// A note is open: its own tools (paragraph styles, tables, formulas…), written as Markdown.
+    var noteMode = false
 
     var body: some View {
+        if noteMode { noteTools } else { dayTools }
+    }
+
+    private var noteTools: some View {
+        HStack(spacing: 2) {
+            NoteStyleMenu(controller: controller, theme: theme)
+            divider
+            tool("bold", "加粗 ⌘B", controller.toggleBold)
+            tool("italic", "斜体 ⌘I", controller.toggleItalic)
+            tool("strikethrough", "删除线", controller.toggleStrike)
+            tool("highlighter", "高亮 ==文字==", controller.highlight)
+            divider
+            tool("list.bullet", "项目符号", { controller.noteLine("- ") })
+            tool("list.number", "编号", { controller.noteLine("1. ") })
+            tool("checklist", "勾选框", { controller.noteLine("- [ ] ") })
+            tool("text.quote", "引用", { controller.noteLine("> ") })
+            tool("exclamationmark.bubble", "提示框 > [!note]", controller.noteCallout)
+            divider
+            tool("tablecells", "表格", controller.noteTable)
+            tool("function", "公式 $…$（选中文字）或公式块 $$", controller.noteFormula)
+            tool("chevron.left.forwardslash.chevron.right", "代码（选中文字）或代码块", controller.noteCode)
+            tool("scribble.variable", "画板（Excalidraw）：新建一张，放进这篇笔记", controller.noteDrawing)
+            tool("link", "链接 ⌘K", controller.link)
+            tool("photo", "插入图片", controller.insertImage)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(theme.toolbar, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var dayTools: some View {
         HStack(spacing: 2) {
             tool("bold", "加粗 ⌘B", controller.toggleBold)
             tool("italic", "斜体 ⌘I", controller.toggleItalic)
@@ -746,6 +826,43 @@ struct PageToolbar: View {
         .accessibilityLabel(help.localized)
     }
 }
+/// 正文 / 标题 1–4, as in 石墨 and Google Docs: shows the caret line's style and sets it (⌥⌘0–4). Headings are the
+/// note's contents in the sidebar.
+struct NoteStyleMenu: View {
+    @ObservedObject var controller: PageController
+    let theme: PlannerTheme
+
+    static func name(_ level: Int) -> String {
+        level == 0 ? String(localized: "正文") : String(localized: "标题 \(level)")
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(0..<5) { level in
+                Button {
+                    controller.noteHeading(level)
+                } label: {
+                    Text(Self.name(level)) + Text(controller.noteStyle == level ? "  ✓" : "")
+                }
+                .keyboardShortcut(KeyEquivalent(Character(String(level))), modifiers: [.command, .option])
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(Self.name(controller.noteStyle)).font(.system(size: 13, weight: .medium))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(theme.ink.opacity(0.8))
+            .frame(width: 78, height: 30)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(DesktopButtonStyle(theme: theme))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("段落样式：正文、标题 1–4（⌥⌘0–4）· 标题会列在左边的目录里")
+    }
+}
+
 /// The few things one does to selected words, right where they are: shown next to a selection, gone when it goes.
 struct SelectionBar: View {
     let controller: PageController

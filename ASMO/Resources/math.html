@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="katex-inline.css">
+<style>
+  html, body { margin: 0; background: transparent; }
+  #box { display: inline-block; padding: 2px 3px; font-size: 17px; white-space: nowrap; }
+  #box.display { padding: 6px 4px; font-size: 19px; }
+  .katex-display { margin: 0; }
+</style>
+<script src="katex.min.js"></script>
+<script>
+  // Draws one formula (KaTeX, as Obsidian does) and reports its size, or what's wrong with it.
+  async function draw(source, display, color) {
+    const box = document.getElementById("box");
+    box.className = display ? "display" : "";
+    box.style.color = color;
+    try {
+      katex.render(source, box, { displayMode: display, throwOnError: true, strict: "ignore", trust: false, output: "html" });
+      // The fonts load on first use: measured and drawn once they are in.
+      await document.fonts.ready;
+      // (A hidden page gets no animation frames: a short wait lets the new glyphs lay out.)
+      await new Promise(resolve => setTimeout(resolve, 30));
+      const rect = box.getBoundingClientRect();
+      return { ok: true, width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+    } catch (error) {
+      box.innerHTML = "";
+      return { ok: false, error: String((error && error.message) || error) };
+    }
+  }
+</script>
+</head>
+<body><div id="box"></div></body>
+</html>

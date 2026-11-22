@@ -53,3 +53,41 @@ struct NoteMarkdownTests {
         #expect(NoteMarkdown.headings(text).map(\.level) == [1, 2, 3])
     }
 }
+
+struct NoteBlocksTests {
+    func cells(_ line: String) -> [String] {
+        let ns = line as NSString
+        return NoteMarkdown.tableCells(line).cells.map { ns.substring(with: $0) }
+    }
+
+    @Test func tableRows() {
+        #expect(cells("| a | b |") == ["a", "b"])
+        #expect(cells("|a|| c |") == ["a", "", "c"])
+        #expect(cells("| x \\| y | z") == ["x \\| y", "z"])
+        #expect(NoteMarkdown.isTableSeparator("| --- | :---: |"))
+        #expect(NoteMarkdown.isTableSeparator("|---|---|"))
+        #expect(!NoteMarkdown.isTableSeparator("| a | b |"))
+    }
+
+    @Test func callouts() {
+        let c = NoteMarkdown.callout("> [!Tip]- Read this")
+        #expect(c?.type == "tip")
+        #expect(c?.folded == true)
+        #expect(c.map { ("> [!Tip]- Read this" as NSString).substring(with: $0.title) } == "Read this")
+        #expect(NoteMarkdown.callout("> plain quote") == nil)
+    }
+
+    @Test func footnotesAndComments() {
+        let ns = "word[^1] and %%hidden%% here" as NSString
+        let kinds = NoteMarkdown.spans(in: ns, line: NSRange(location: 0, length: ns.length)).map(\.kind)
+        #expect(kinds == [.footnote, .comment])
+    }
+
+    @Test func codeColours() {
+        let line = #"let name = "a # b" // note"#
+        let kinds = NoteMarkdown.codeTokens(line, hashComments: false).map(\.kind)
+        #expect(kinds == [.keyword, .string, .comment])
+        let python = "x = 42  # answer"
+        #expect(NoteMarkdown.codeTokens(python, hashComments: true).map(\.kind) == [.number, .comment])
+    }
+}

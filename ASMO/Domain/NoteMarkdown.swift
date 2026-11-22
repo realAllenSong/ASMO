@@ -35,6 +35,10 @@ public enum NoteMarkdown {
 
     public enum SpanKind: Equatable, Sendable {
         case bold, italic, strike, highlight, code, math, tag, url
+        /// "[^1]": a footnote's mark.
+        case footnote
+        /// "%%…%%": a comment (hidden in reading).
+        case comment
         case link(String)
         case wikilink(String)
         case embed(String)
@@ -174,6 +178,8 @@ public enum NoteMarkdown {
 
     private static let patterns: [(SpanKind, String, Int)] = [
         // (kind, pattern, capture group of the shown content)
+        (.comment, #"%%(.+?)%%"#, 1),
+        (.footnote, #"\[\^([^\]\s]+)\](?!:)"#, 1),
         (.embed(""), #"!\[\[([^\]]+)\]\]"#, 1),
         (.wikilink(""), #"\[\[([^\]]+)\]\]"#, 1),
         (.link(""), #"!?\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#, 1),
@@ -253,6 +259,114 @@ public enum NoteMarkdown {
         if let bar = value.firstIndex(of: "|") { value = String(value[..<bar]) }
         if let hash = value.firstIndex(of: "#") { value = String(value[..<hash]) }
         return value.trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: Tables
+
+    /// "| --- | :---: |": the line under a table's header.
+    public static func isTableSeparator(_ line: String) -> Bool {
+        first(#"^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{0,}:?\s*\|?\s*$"#, in: line) != nil
+    }
+
+    /// A table row's cells: each cell's words (trimmed; empty for an empty cell), as ranges into the line, and the
+    /// bars between them. "\|" inside a cell is not a bar.
+    public static func tableCells(_ line: String) -> (cells: [NSRange], bars: [Int]) {
+        let ns = line as NSString
+        var bars: [Int] = []
+        var index = 0
+        while index < ns.length {
+            let character = ns.character(at: index)
+            if character == 92 { index += 2; continue } // backslash
+            if character == 124 { bars.append(index) }
+            index += 1
+        }
+        // A row needs a bar at its start (as the lines classified as tables have).
+        guard let firstBar = bars.first else { return ([], []) }
+        let lastIsClosing = ns.substring(from: bars.last! + 1).trimmingCharacters(in: .whitespaces).isEmpty
+        var edges = bars
+        if !lastIsClosing { edges.append(ns.length) }
+        var cells: [NSRange] = []
+        for (a, b) in zip(edges, edges.dropFirst()) {
+            var start = a + 1, end = b
+            while start < end, ns.character(at: start) == 32 || ns.character(at: start) == 9 { start += 1 }
+            while end > start, ns.character(at: end - 1) == 32 || ns.character(at: end - 1) == 9 { end -= 1 }
+            cells.append(NSRange(location: start, length: end - start))
+        }
+        _ = firstBar
+        return (cells, bars)
+    }
+
+    // MARK: Callouts
+
+    public struct Callout: Equatable, Sendable {
+        /// "note", "tip", "warning"… (lowercased).
+        public var type: String
+        /// "> [!note]-" in the line: hidden in reading.
+        public var marker: NSRange
+        /// The title written after it (empty: the type is the title).
+        public var title: NSRange
+        public var folded: Bool
+    }
+
+    /// The first line of an Obsidian callout: "> [!tip] Title".
+    public static func callout(_ line: String) -> Callout? {
+        guard let m = first(#"^(\s*>\s*\[!([A-Za-z-]+)\]([+-]?))\s*(.*)$"#, in: line) else { return nil }
+        let ns = line as NSString
+        return Callout(type: ns.substring(with: m.range(at: 2)).lowercased(), marker: m.range(at: 1), title: m.range(at: 4),
+                       folded: ns.substring(with: m.range(at: 3)) == "-")
+    }
+
+    // MARK: Code
+
+    public enum TokenKind: Equatable, Sendable { case keyword, string, comment, number }
+
+    public struct Token: Equatable, Sendable {
+        public var kind: TokenKind
+        public var range: NSRange
+    }
+
+    private static let keywords: Set<String> = [
+        "func", "let", "var", "if", "else", "for", "while", "return", "import", "from", "class", "struct", "enum", "def",
+        "in", "of", "const", "function", "async", "await", "try", "catch", "throw", "throws", "guard", "switch", "case",
+        "break", "continue", "true", "false", "nil", "null", "None", "True", "False", "self", "this", "new", "public",
+        "private", "static", "extension", "protocol", "interface", "type", "export", "default", "do", "with", "as",
+        "and", "or", "not", "is", "lambda", "yield", "pass", "raise", "except", "finally", "elif", "fn", "pub", "mut",
+        "impl", "use", "mod", "match", "go", "package", "int", "float", "string", "bool", "void", "echo", "then",
+        "fi", "done", "select", "where", "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "JOIN", "ON",
+    ]
+
+    /// Colours for one line of code: strings, comments, numbers and the common keywords of most languages.
+    /// `hashComments`: "#" starts a comment (Python, shell, YAML, Ruby, R…).
+    public static func codeTokens(_ line: String, hashComments: Bool) -> [Token] {
+        let ns = line as NSString
+        var tokens: [Token] = []
+        var taken: [NSRange] = []
+        func free(_ r: NSRange) -> Bool { !taken.contains { NSIntersectionRange($0, r).length > 0 } }
+        let comment = hashComments ? #"(?<![\w$"'])#(?![!{\[]).*$|//.*$|--\s.*$"# : #"//.*$|/\*.*?(\*/|$)|<!--.*?(-->|$)"#
+        let pieces: [(TokenKind, String)] = [
+            (.string, #""(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|`(?:[^`\\]|\\.)*`?"#),
+            (.comment, comment),
+        ]
+        // Strings and comments: whichever starts first wins.
+        var found: [(TokenKind, NSRange)] = []
+        for (kind, pattern) in pieces {
+            guard let regex = cache(pattern) else { continue }
+            for m in regex.matches(in: line, range: NSRange(location: 0, length: ns.length)) { found.append((kind, m.range)) }
+        }
+        for (kind, range) in found.sorted(by: { $0.1.location < $1.1.location }) where free(range) {
+            tokens.append(Token(kind: kind, range: range))
+            taken.append(range)
+        }
+        if let regex = cache(#"\b(\d+(?:\.\d+)?)\b|\b([A-Za-z_]+)\b"#) {
+            for m in regex.matches(in: line, range: NSRange(location: 0, length: ns.length)) where free(m.range) {
+                if m.range(at: 1).location != NSNotFound {
+                    tokens.append(Token(kind: .number, range: m.range))
+                } else if keywords.contains(ns.substring(with: m.range)) {
+                    tokens.append(Token(kind: .keyword, range: m.range))
+                }
+            }
+        }
+        return tokens.sorted { $0.range.location < $1.range.location }
     }
 
     // MARK: Headings

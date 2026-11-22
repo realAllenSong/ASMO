@@ -865,6 +865,12 @@ struct PlannerView: View {
             openNote = root.appendingPathComponent(String(command.dropFirst(5)))
         } else if command == "days" {
             openNote = nil
+            sidebarMode = "days"
+        } else if command.hasPrefix("find:") {
+            noteOutline.find?(String(command.dropFirst(5)))
+        } else if command == "home" {
+            sidebarMode = "notes"
+            openNote = nil
         } else if command == "find" {
             findingNote = true
         } else if command == "rewrite" {
@@ -895,7 +901,10 @@ struct PlannerView: View {
             let range = string.range(of: text)
             return range.location == NSNotFound ? nil : range
         }
+        // Driven as if clicked into (a note shows the marks of the caret's line only after a click or a key).
+        (view as? NoteTextView)?.engaged = true
         switch verb {
+        case "heading": pageController.noteHeading(Int(rest) ?? 0)
         case "sel": if let range = find(rest) { view.setSelectedRange(range) }
         case "caret": if let range = find(rest) { view.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0)) }
         case "line": if let range = find(rest) { view.setSelectedRange(string.paragraphRange(for: range)) }
@@ -1264,7 +1273,7 @@ struct PlannerView: View {
             Image("BrandMark").resizable().interpolation(.high).scaledToFit().frame(width: 26, height: 24)
                 .accessibilityHidden(true)
             // Back to this month (to today in it), wherever the document is: ⇧⌘T too.
-            if openNote == nil {
+            if openNote == nil, !notesHome {
             Button { jump(to: clock.today) } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
@@ -1282,6 +1291,7 @@ struct PlannerView: View {
     private func jump(to day: PlanDate) {
         #if os(macOS)
         openNote = nil
+        sidebarMode = "days"
         #endif
         let today = clock.today
         paperFocus = day == today ? nil : day.dayOnly
@@ -1303,7 +1313,9 @@ struct PlannerView: View {
     private var paperHome: some View {
         VStack(spacing: 0) {
             ZStack {
-                PageToolbar(controller: pageController, theme: theme).fixedSize()
+                if !notesHome, !(openNote.map { ExcalidrawFile.isDrawing($0.lastPathComponent) } ?? false) {
+                    PageToolbar(controller: pageController, theme: theme, noteMode: openNote != nil).fixedSize()
+                }
                 HStack(spacing: 8) {
                     homeLeading
                     Spacer()
@@ -1351,9 +1363,16 @@ struct PlannerView: View {
                     paperSidebar
                     Rectangle().fill(theme.line.opacity(0.6)).frame(width: 1)
                 }
-                if let openNote {
+                if let openNote, ExcalidrawFile.isDrawing(openNote.lastPathComponent) {
+                    DrawingScreen(url: openNote, theme: theme, library: noteLibrary, back: noteBefore(openNote).map { previous in { self.openNote = previous } })
+                        .background(theme.sheet)
+                } else if let openNote {
                     NoteScreen(url: openNote, theme: theme, library: noteLibrary, outline: noteOutline, controller: pageController,
                                open: { self.openNote = $0 })
+                        .background(theme.sheet)
+                        .onAppear { pageController.openNote = { self.openNote = $0 } }
+                } else if notesHome {
+                    NotesHome(library: noteLibrary, theme: theme, days: searchDays, choose: chooseResult, create: createNote)
                         .background(theme.sheet)
                 } else {
                 DayDocumentView(days: days, anchor: paperFocus ?? clock.today, jump: paperJump, theme: theme,
@@ -1377,8 +1396,8 @@ struct PlannerView: View {
             if findingNote {
                 ZStack(alignment: .top) {
                     Color.black.opacity(0.08).ignoresSafeArea().onTapGesture { findingNote = false }
-                    NoteFinder(library: noteLibrary, theme: theme, open: { url in findingNote = false; openNote = url },
-                               close: { findingNote = false })
+                    NoteFinder(library: noteLibrary, theme: theme, days: searchDays, choose: chooseResult,
+                               create: { findingNote = false; createNote($0) }, close: { findingNote = false })
                         .padding(.top, 90)
                 }
             }
@@ -1386,14 +1405,65 @@ struct PlannerView: View {
         .background {
             // ⌘P finds a note; ⌘N starts one.
             Button("") { findingNote.toggle() }.keyboardShortcut("p", modifiers: .command).opacity(0)
-            Button("") {
-                if let url = try? noteLibrary.create(in: openNote?.deletingLastPathComponent()) { openNote = url }
-            }.keyboardShortcut("n", modifiers: .command).opacity(0)
+            Button("") { createNote(nil) }.keyboardShortcut("n", modifiers: .command).opacity(0)
+            // ⌥⌘0–4: 正文, 标题 1–4 in a note.
+            if openNote != nil {
+                ForEach(0..<5) { level in
+                    Button("") { pageController.noteHeading(level) }
+                        .keyboardShortcut(KeyEquivalent(Character(String(level))), modifiers: [.command, .option]).opacity(0)
+                }
+            }
         }
     }
 
     /// What the sidebar lists: the days by month, or the notes.
     @AppStorage("sidebarMode") private var sidebarMode = "days"
+
+    /// The notes' home page is showing (the notes chosen, none open).
+    private var notesHome: Bool { sidebarMode == "notes" && openNote == nil }
+
+    /// To-dos and events whose words match, newest day first (for searching everything).
+    private func searchDays(_ query: String) -> [NoteSearch.DayHit] {
+        let wanted = query.trimmingCharacters(in: .whitespaces)
+        guard !wanted.isEmpty else { return [] }
+        return tasks.compactMap { task -> NoteSearch.DayHit? in
+            guard let day = task.schedule?.dayOnly, task.title.localizedCaseInsensitiveContains(wanted) else { return nil }
+            return NoteSearch.DayHit(day: day, title: task.title)
+        }
+        .sorted { $0.day > $1.day }
+    }
+
+    private func chooseResult(_ result: NoteSearch.Result) {
+        findingNote = false
+        switch result.target {
+        case .note(let url, let find):
+            if openNote?.standardizedFileURL == url.standardizedFileURL {
+                if let find { noteOutline.find?(find) }
+            } else {
+                noteOutline.pendingFind = find
+                openNote = url
+            }
+        case .day(let day):
+            jump(to: day)
+        }
+    }
+
+    /// The note open before this one (a drawing goes back to the note it was opened from).
+    private func noteBefore(_ url: URL) -> URL? {
+        guard let root = noteLibrary.root else { return nil }
+        let here = noteLibrary.path(of: url)
+        return noteLibrary.opened.first { $0 != here && !ExcalidrawFile.isDrawing($0) }
+            .map { root.appendingPathComponent($0) }
+            .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
+
+    /// A new note: named, or 未命名 in the folder of the note open.
+    private func createNote(_ name: String?) {
+        let made: URL?
+        if let name { made = try? noteLibrary.create(name: name) }
+        else { made = try? noteLibrary.create(in: openNote?.deletingLastPathComponent()) }
+        if let made { openNote = made }
+    }
     /// The note open when the notes were last left (opened again on coming back).
     @AppStorage("lastNote") private var lastNote = ""
 
@@ -1403,7 +1473,7 @@ struct PlannerView: View {
         VStack(spacing: 6) {
             railButton("calendar", label: "日程", shortcut: "1", selected: sidebarMode == "days") { showDays() }
             railButton("doc.text", label: "笔记", shortcut: "2", selected: sidebarMode == "notes") { showNotes() }
-            railButton("magnifyingglass", label: "找笔记 ⌘P", shortcut: nil, selected: false) { findingNote = true }
+            railButton("magnifyingglass", label: "搜索笔记和日程 ⌘P", shortcut: nil, selected: false) { findingNote = true }
             Spacer()
             railButton("gearshape", label: "设置", shortcut: nil, selected: false) { sheet = .settings }
         }
@@ -1437,22 +1507,22 @@ struct PlannerView: View {
         openNote = nil
     }
 
+    /// The notes: their home page first (what to go on with, what was written before); clicked again there, the
+    /// list folds away.
     private func showNotes() {
-        if sidebarMode == "notes", openNote != nil { paperContents.toggle(); return }
+        if notesHome { paperContents.toggle(); return }
+        if let openNote { lastNote = openNote.path }
         sidebarMode = "notes"
         paperContents = true
-        if openNote == nil {
-            let last = URL(fileURLWithPath: lastNote)
-            if !lastNote.isEmpty, FileManager.default.fileExists(atPath: last.path) { openNote = last }
-            else { openNote = noteLibrary.notes.max { noteLibrary.modifiedDate($0) < noteLibrary.modifiedDate($1) } }
-        }
+        openNote = nil
     }
 
     private var paperSidebar: some View {
         Group {
             if sidebarMode == "notes" {
-                NotesSidebar(library: noteLibrary, theme: theme, current: openNote, open: { openNote = $0; lastNote = $0.path },
-                             find: { findingNote = true })
+                NotesSidebar(library: noteLibrary, theme: theme, current: openNote, outline: noteOutline,
+                             open: { openNote = $0; lastNote = $0.path }, find: { findingNote = true },
+                             atHome: notesHome, home: { openNote = nil })
             } else {
                 PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
                                      today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,

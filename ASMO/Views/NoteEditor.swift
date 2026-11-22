@@ -9,14 +9,43 @@ extension NSAttributedString.Key {
     static let noteDraw = NSAttributedString.Key("asmo.note.draw")
     /// The note a [[link]] opens.
     static let noteLink = NSAttributedString.Key("asmo.note.link")
+    /// A picture drawn for the source it hides (a formula, a diagram, a drawing, a note inside the note).
+    static let noteImage = NSAttributedString.Key("asmo.note.image")
+}
+
+/// A picture standing for source text: under its line (a block), or in the room its hidden source leaves (inline).
+final class NoteImage: NSObject {
+    let image: NSImage
+    let size: NSSize
+    let inline: Bool
+    var centered = false
+    /// On a white card (diagrams are drawn for white).
+    var panel = false
+    /// The note a click opens.
+    var link: String?
+
+    init(image: NSImage, size: NSSize, inline: Bool, centered: Bool = false, panel: Bool = false, link: String? = nil) {
+        self.image = image
+        self.size = size
+        self.inline = inline
+        self.centered = centered
+        self.panel = panel
+        self.link = link
+    }
 }
 
 /// What a note page shows besides the text: its headings (the contents in the margin).
 @MainActor
 final class NoteOutline: ObservableObject {
     @Published var headings: [NoteMarkdown.Heading] = []
+    /// The heading the reader is under (highlighted in the sidebar).
+    @Published var current: Int?
     /// Set to a heading's range to go there.
     var go: ((NSRange) -> Void)?
+    /// Words to show once the next note opens (a search result).
+    var pendingFind: String?
+    /// Shows words in the note open now.
+    var find: ((String) -> Void)?
 }
 
 /// A note, edited as the Markdown it is. The text in the editor is the file (nothing is converted, so Obsidian and
@@ -30,6 +59,8 @@ struct NoteEditorView: NSViewRepresentable {
     let outline: NoteOutline
     var controller: PageController?
     let open: (URL) -> Void
+    /// Shown above the text, scrolling with it (the note's name).
+    var header: AnyView?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -69,11 +100,27 @@ struct NoteEditorView: NSViewRepresentable {
         view.textStorage?.delegate = context.coordinator
         view.coordinator = context.coordinator
         scroll.documentView = view
+        if let header {
+            let hosting = NSHostingView(rootView: header)
+            view.addSubview(hosting)
+            view.header = hosting
+        }
         context.coordinator.view = view
         context.coordinator.load()
         controller?.textView = view
         outline.go = { [weak coordinator = context.coordinator] range in coordinator?.go(to: range) }
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        outline.find = { [weak coordinator = context.coordinator] words in coordinator?.show(words) }
+        // The heading being read is followed in the sidebar.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) {
+            [weak coordinator = context.coordinator] _ in
+            MainActor.assumeIsolated { coordinator?.scrolled() }
+        }
+        // A formula, diagram or drawing finished: drawn in place of its source.
+        NotificationCenter.default.addObserver(forName: NoteRenders.ready, object: nil, queue: .main) { [weak coordinator = context.coordinator] _ in
+            MainActor.assumeIsolated { coordinator?.restyle() }
+        }
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view); view.layoutColumn() }
         return scroll
     }
 
@@ -84,15 +131,8 @@ struct NoteEditorView: NSViewRepresentable {
         coordinator.parent = self
         if let view = coordinator.view {
             controller?.textView = view
-            // A column of comfortable width, centred.
-            let side = max(40, (scroll.contentView.bounds.width - 760) / 2)
-            if abs(view.textContainerInset.width - side) > 0.5 { view.textContainerInset = NSSize(width: side, height: 24) }
-            // Pictures leave room for themselves at the column's width: a new width draws them again.
-            let column = max(200, min(760, scroll.contentView.bounds.width - 80))
-            if scroll.contentView.bounds.width > 0, abs(view.columnWidth - column) > 1 {
-                view.columnWidth = column
-                if !urlChanged { DispatchQueue.main.async { coordinator.restyle() } }
-            }
+            if let header { view.header?.rootView = header }
+            view.layoutColumn()
         }
         if urlChanged {
             coordinator.save()
@@ -152,6 +192,57 @@ struct NoteEditorView: NSViewRepresentable {
             view.undoManager?.removeAllActions()
             view.scroll(.zero)
             outlineNow()
+            library.noteOpened(parent.url)
+            if let words = parent.outline.pendingFind {
+                parent.outline.pendingFind = nil
+                DispatchQueue.main.async { [weak self] in self?.show(words) }
+            }
+        }
+
+        /// Selects the first place the words are written and brings it into view (opened from a search).
+        func show(_ words: String) {
+            guard let view else { return }
+            let found = (view.string as NSString).range(of: words, options: [.caseInsensitive, .diacriticInsensitive])
+            guard found.location != NSNotFound else { return }
+            go(to: found)
+            view.setSelectedRange(found)
+            view.showFindIndicator(for: found)
+        }
+
+        private var trackingScroll = false
+
+        /// Notes which heading the top of the window is under (a few times a second at most).
+        func scrolled() {
+            guard !trackingScroll else { return }
+            trackingScroll = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.trackingScroll = false
+                self?.trackHeading()
+            }
+        }
+
+        private func trackHeading() {
+            guard let view, let layout = view.layoutManager, let clip = view.enclosingScrollView?.contentView else { return }
+            let headings = parent.outline.headings
+            let top = clip.bounds.minY - view.textContainerOrigin.y + 90
+            var index: Int?
+            let length = view.string.utf16.count
+            for (i, heading) in headings.enumerated() where heading.range.location < length {
+                let glyph = layout.glyphIndexForCharacter(at: heading.range.location)
+                if layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY <= top { index = i } else { break }
+            }
+            if parent.outline.current != index { parent.outline.current = index }
+        }
+
+        /// The paragraph style the caret's line has, for the toolbar (0 text, 1–6 a heading).
+        private func publishStyle() {
+            guard let view, let controller = parent.controller else { return }
+            let string = view.string as NSString
+            let line = string.paragraphRange(for: NSRange(location: min(view.selectedRange().location, string.length), length: 0))
+            let text = string.substring(with: line)
+            var level = 0
+            if let match = text.range(of: #"^#{1,6}(?=\s)"#, options: .regularExpression) { level = text.distance(from: match.lowerBound, to: match.upperBound) }
+            if controller.noteStyle != level { controller.noteStyle = level }
         }
 
         /// Writes the note if it changed (soon after typing stops, and when leaving it).
@@ -197,6 +288,7 @@ struct NoteEditorView: NSViewRepresentable {
         private var bodyFont: NSFont { .systemFont(ofSize: 16) }
         private var monoFont: NSFont { .monospacedSystemFont(ofSize: 13.5, weight: .regular) }
         private let hiddenFont = NSFont.systemFont(ofSize: 0.1)
+        private var tableFont: NSFont { .systemFont(ofSize: 14.5) }
 
         private func paragraph(before: CGFloat = 0, after: CGFloat = 6, indent: CGFloat = 0) -> NSMutableParagraphStyle {
             let style = NSMutableParagraphStyle()
@@ -208,47 +300,168 @@ struct NoteEditorView: NSViewRepresentable {
             return style
         }
 
+        /// A line that takes (almost) no room: the hidden lines of a block shown as a picture or a table's
+        /// "|---|" line.
+        private var flat: NSParagraphStyle {
+            let style = NSMutableParagraphStyle()
+            style.maximumLineHeight = 0.5
+            style.lineSpacing = 0
+            return style
+        }
+
         private var base: [NSAttributedString.Key: Any] {
             [.font: bodyFont, .foregroundColor: ink, .paragraphStyle: paragraph()]
+        }
+
+        /// What a line is part of beyond itself.
+        enum Block {
+            case code(language: String)
+            case callout(type: String, first: Bool)
+            /// Lines shown as one picture: "math" between $$, "mermaid" in a ```mermaid fence.
+            case rendered(kind: String, source: String, first: Bool)
+            case table
+        }
+
+        /// The blocks of the note: each line's block (by the line's start) with the whole block's range.
+        private func blocks(_ lines: [NoteMarkdown.Line], _ string: NSString) -> [Int: (block: Block, whole: NSRange)] {
+            var result: [Int: (Block, NSRange)] = [:]
+            func whole(_ from: Int, _ to: Int) -> NSRange {
+                NSRange(location: lines[from].range.location, length: NSMaxRange(lines[to].range) - lines[from].range.location)
+            }
+            var index = 0
+            while index < lines.count {
+                let line = lines[index]
+                let text = string.substring(with: line.range)
+                switch line.kind {
+                case .fence:
+                    var end = index + 1
+                    while end < lines.count, lines[end].kind != .fence { end += 1 }
+                    let last = min(end, lines.count - 1)
+                    let language = text.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "`~"))
+                        .trimmingCharacters(in: .whitespaces).lowercased()
+                    let range = whole(index, last)
+                    if language == "mermaid", end < lines.count {
+                        let source = lines[(index + 1)..<end].map { string.substring(with: $0.range) }.joined(separator: "\n")
+                        for i in index...last { result[lines[i].range.location] = (.rendered(kind: "mermaid", source: source, first: i == index), range) }
+                    } else {
+                        for i in index...last { result[lines[i].range.location] = (.code(language: language), range) }
+                    }
+                    index = last + 1
+                case .mathFence:
+                    var end = index + 1
+                    while end < lines.count, lines[end].kind != .mathFence { end += 1 }
+                    let last = min(end, lines.count - 1)
+                    let source = lines[(index + 1)..<max(index + 1, end)].map { string.substring(with: $0.range) }.joined(separator: "\n")
+                    if end < lines.count, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let range = whole(index, last)
+                        for i in index...last { result[lines[i].range.location] = (.rendered(kind: "math", source: source, first: i == index), range) }
+                    }
+                    index = last + 1
+                case .math:
+                    // "$$x$$" on a line of its own.
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix("$$"), trimmed.hasSuffix("$$"), trimmed.count > 4 {
+                        let source = String(trimmed.dropFirst(2).dropLast(2))
+                        result[line.range.location] = (.rendered(kind: "math", source: source, first: true), line.range)
+                    }
+                    index += 1
+                case .table:
+                    var end = index
+                    while end + 1 < lines.count, lines[end + 1].kind == .table { end += 1 }
+                    // A table has its "|---|" line second.
+                    if end > index, NoteMarkdown.isTableSeparator(string.substring(with: lines[index + 1].range)) {
+                        let range = whole(index, end)
+                        for i in index...end { result[lines[i].range.location] = (.table, range) }
+                    }
+                    index = end + 1
+                case .quote:
+                    if let callout = NoteMarkdown.callout(text) {
+                        var end = index
+                        while end + 1 < lines.count, lines[end + 1].kind == .quote { end += 1 }
+                        let range = whole(index, end)
+                        for i in index...end { result[lines[i].range.location] = (.callout(type: callout.type, first: i == index), range) }
+                        index = end + 1
+                    } else {
+                        index += 1
+                    }
+                default:
+                    index += 1
+                }
+            }
+            return result
+        }
+
+        /// The caret is in this block (its source shows, to be written).
+        private func editing(_ range: NSRange) -> Bool {
+            guard let caretLine else { return false }
+            return NSIntersectionRange(caretLine, NSRange(location: range.location, length: max(range.length, 1))).length > 0
+                || (caretLine.location >= range.location && caretLine.location <= NSMaxRange(range))
         }
 
         /// Draws the whole note again.
         func restyle() {
             guard let storage = view?.textStorage else { return }
+            view?.linkedPictures = [:]
             styling = true
             storage.beginEditing()
             let lines = NoteMarkdown.lines(storage.string)
-            for line in lines { style(line, in: storage) }
+            let found = blocks(lines, storage.string as NSString)
+            for line in lines { style(line, block: found[line.range.location], in: storage) }
+            layTables(lines, found, in: storage, within: nil)
             storage.endEditing()
             styling = false
             view?.typingAttributes = base
             view?.needsDisplay = true
         }
 
-        /// Draws again the lines a range touches (after an edit, or the caret moving on or off them).
+        /// Draws again the lines a range touches (after an edit, or the caret moving on or off them), and the whole
+        /// of any block (table, formula, callout…) they are in.
         private func restyle(around range: NSRange) {
             guard let storage = view?.textStorage, storage.length >= 0 else { return }
             let string = storage.string as NSString
-            let covered = string.paragraphRange(for: NSRange(location: min(range.location, string.length), length: min(range.length, max(0, string.length - range.location))))
+            var covered = string.paragraphRange(for: NSRange(location: min(range.location, string.length), length: min(range.length, max(0, string.length - range.location))))
             let lines = NoteMarkdown.lines(storage.string)
+            let found = blocks(lines, string)
+            for line in lines where touches(line, covered) {
+                if let whole = found[line.range.location]?.whole { covered = NSUnionRange(covered, whole) }
+            }
             styling = true
             storage.beginEditing()
-            for line in lines where NSIntersectionRange(NSRange(location: line.range.location, length: max(line.range.length, 1)), covered).length > 0
-                || (line.range.location >= covered.location && line.range.location <= NSMaxRange(covered)) {
-                style(line, in: storage)
+            for line in lines where touches(line, covered) {
+                style(line, block: found[line.range.location], in: storage)
             }
+            layTables(lines, found, in: storage, within: covered)
             storage.endEditing()
             styling = false
             view?.needsDisplay = true
         }
 
-        private func style(_ line: NoteMarkdown.Line, in storage: NSTextStorage) {
+        private func touches(_ line: NoteMarkdown.Line, _ covered: NSRange) -> Bool {
+            NSIntersectionRange(NSRange(location: line.range.location, length: max(line.range.length, 1)), covered).length > 0
+                || (line.range.location >= covered.location && line.range.location <= NSMaxRange(covered))
+        }
+
+        private func style(_ line: NoteMarkdown.Line, block: (block: Block, whole: NSRange)?, in storage: NSTextStorage) {
             let string = storage.string as NSString
             // The line with its break (attributes of the break set the paragraph's spacing).
             var whole = line.range
             if NSMaxRange(whole) < string.length { whole.length += 1 }
             guard NSMaxRange(whole) <= storage.length else { return }
             let showMarks = caretLine.map { NSIntersectionRange($0, whole).length > 0 || $0.location == line.range.location } ?? false
+            // A formula or diagram, not being written: its picture instead of its lines.
+            if case .rendered(let kind, let source, let first)? = block?.block, let range = block?.whole, !editing(range),
+               let image = kind == "math" ? NoteRenders.shared.math(source, display: true, color: ink) : NoteRenders.shared.mermaid(source) {
+                storage.setAttributes([.font: hiddenFont, .foregroundColor: NSColor.clear, .paragraphStyle: flat], range: whole)
+                if first {
+                    let size = fitted(image.size, maxHeight: kind == "math" ? 400 : 640)
+                    let style = paragraph(before: 4, after: size.height + 12)
+                    style.lineSpacing = 0
+                    storage.addAttributes([.paragraphStyle: style,
+                                           .noteImage: NoteImage(image: image, size: size, inline: false, centered: kind == "math", panel: kind == "mermaid")],
+                                          range: whole)
+                }
+                return
+            }
             var attributes = base
             switch line.kind {
             case .heading(let level):
@@ -257,7 +470,7 @@ struct NoteEditorView: NSViewRepresentable {
                 attributes[.paragraphStyle] = paragraph(before: level <= 2 ? 14 : 8, after: 6)
             case .code, .fence:
                 attributes[.font] = monoFont
-                attributes[.paragraphStyle] = paragraph(after: 0, indent: 12)
+                attributes[.paragraphStyle] = paragraph(after: 0, indent: 14)
                 attributes[.noteDraw] = "code"
                 if case .fence = line.kind { attributes[.foregroundColor] = quiet }
             case .frontmatter:
@@ -270,13 +483,27 @@ struct NoteEditorView: NSViewRepresentable {
                 attributes[.foregroundColor] = accent
                 attributes[.paragraphStyle] = paragraph(after: 2, indent: 12)
             case .table:
-                attributes[.font] = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+                if let range = block?.whole, !editing(range) {
+                    attributes[.font] = tableFont
+                } else {
+                    attributes[.font] = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+                }
                 attributes[.paragraphStyle] = paragraph(after: 0)
             case .quote:
-                attributes[.foregroundColor] = quiet
-                attributes[.paragraphStyle] = paragraph(indent: 16)
+                if case .callout(let type, let first)? = block?.block {
+                    let style = paragraph(before: first ? 4 : 0, after: 0, indent: 16)
+                    style.tailIndent = -12
+                    attributes[.paragraphStyle] = style
+                    attributes[.noteDraw] = "callout:" + type
+                } else {
+                    attributes[.foregroundColor] = quiet
+                    attributes[.paragraphStyle] = paragraph(indent: 16)
+                }
             case .rule:
                 attributes[.foregroundColor] = quiet
+                attributes[.paragraphStyle] = paragraph(before: 6, after: 10)
+                if !showMarks { attributes[.font] = NSFont.systemFont(ofSize: 8); attributes[.foregroundColor] = NSColor.clear }
+                attributes[.noteDraw] = "rule"
             default:
                 break
             }
@@ -285,9 +512,16 @@ struct NoteEditorView: NSViewRepresentable {
                 embed(target, line: line, showMarks: showMarks, in: storage)
                 return
             }
-            if let marker = line.marker { decorateMarker(line, marker: marker, showMarks: showMarks, in: storage) }
+            if case .callout(_, let first)? = block?.block {
+                decorateCallout(line, first: first, showMarks: showMarks, in: storage)
+            } else if let marker = line.marker {
+                decorateMarker(line, marker: marker, showMarks: showMarks, in: storage)
+            }
             switch line.kind {
-            case .code, .fence, .frontmatter, .math, .mathFence:
+            case .code:
+                if case .code(let language)? = block?.block { colourCode(line, language: language, in: storage) }
+                return
+            case .fence, .frontmatter, .math, .mathFence, .rule:
                 return
             case .task(_, let done) where done:
                 let words = NSRange(location: NSMaxRange(line.marker ?? line.range), length: NSMaxRange(line.range) - NSMaxRange(line.marker ?? line.range))
@@ -300,9 +534,146 @@ struct NoteEditorView: NSViewRepresentable {
             for span in NoteMarkdown.spans(in: string, line: line.range) { decorate(span, showMarks: showMarks, in: storage) }
         }
 
+        /// A picture's size on the page: no wider than the column, no taller than `maxHeight`.
+        private func fitted(_ size: NSSize, maxHeight: CGFloat) -> NSSize {
+            let width = max(200, (view?.columnWidth ?? 760) - 4)
+            var result = size
+            if result.width > width { result = NSSize(width: width, height: result.height * width / result.width) }
+            if result.height > maxHeight { result = NSSize(width: result.width * maxHeight / result.height, height: maxHeight) }
+            return result
+        }
+
         private func hide(_ range: NSRange, in storage: NSTextStorage) {
             guard range.length > 0 else { return }
             storage.addAttributes([.font: hiddenFont, .foregroundColor: NSColor.clear], range: range)
+        }
+
+        /// "> [!tip] Title": the marks go, the title (or the kind, when there's none) shows bold in the callout's
+        /// colour; the other lines lose their "> ".
+        private func decorateCallout(_ line: NoteMarkdown.Line, first: Bool, showMarks: Bool, in storage: NSTextStorage) {
+            let string = storage.string as NSString
+            let text = string.substring(with: line.range)
+            if first, let callout = NoteMarkdown.callout(text) {
+                let colour = NoteTextView.calloutColour(callout.type)
+                let marker = NSRange(location: line.range.location + callout.marker.location, length: callout.marker.length)
+                let title = NSRange(location: line.range.location + callout.title.location, length: callout.title.length)
+                let bold = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
+                if showMarks {
+                    storage.addAttribute(.foregroundColor, value: quiet, range: marker)
+                    storage.addAttributes([.font: bold, .foregroundColor: colour], range: title)
+                } else if title.length > 0 {
+                    hide(NSRange(location: marker.location, length: title.location - marker.location), in: storage)
+                    storage.addAttributes([.font: bold, .foregroundColor: colour], range: title)
+                } else {
+                    // No title: the kind's name shows ("tip"), the brackets don't.
+                    let kind = (text as NSString).range(of: callout.type, options: .caseInsensitive, range: callout.marker)
+                    let shown = NSRange(location: line.range.location + kind.location, length: kind.length)
+                    hide(NSRange(location: marker.location, length: shown.location - marker.location), in: storage)
+                    hide(NSRange(location: NSMaxRange(shown), length: NSMaxRange(marker) - NSMaxRange(shown)), in: storage)
+                    storage.addAttributes([.font: bold, .foregroundColor: colour], range: shown)
+                }
+                return
+            }
+            guard let marker = line.marker else { return }
+            if showMarks { storage.addAttribute(.foregroundColor, value: quiet, range: marker) } else { hide(marker, in: storage) }
+        }
+
+        /// Keywords, strings, comments and numbers in their colours.
+        private func colourCode(_ line: NoteMarkdown.Line, language: String, in storage: NSTextStorage) {
+            let hash: Set<String> = ["python", "py", "sh", "bash", "zsh", "shell", "console", "yaml", "yml", "ruby", "rb", "r", "toml",
+                                     "perl", "dockerfile", "makefile", "make", "conf", "nginx", "powershell", "ps1", "julia", "elixir"]
+            let text = (storage.string as NSString).substring(with: line.range)
+            let dark = theme.dark
+            for token in NoteMarkdown.codeTokens(text, hashComments: hash.contains(language)) {
+                let colour: NSColor
+                switch token.kind {
+                case .keyword: colour = dark ? NSColor(red: 0.98, green: 0.47, blue: 0.67, alpha: 1) : NSColor(red: 0.68, green: 0.1, blue: 0.45, alpha: 1)
+                case .string: colour = dark ? NSColor(red: 0.6, green: 0.84, blue: 0.5, alpha: 1) : NSColor(red: 0.13, green: 0.5, blue: 0.13, alpha: 1)
+                case .comment: colour = quiet
+                case .number: colour = dark ? NSColor(red: 0.98, green: 0.72, blue: 0.42, alpha: 1) : NSColor(red: 0.7, green: 0.38, blue: 0.0, alpha: 1)
+                }
+                storage.addAttribute(.foregroundColor, value: colour, range: NSRange(location: line.range.location + token.range.location, length: token.range.length))
+            }
+        }
+
+        /// Tables not being written are drawn as tables: the bars go, each cell is padded to its column's width
+        /// (by spacing after its last letter), and the grid is drawn behind. A table wider than the column stays as
+        /// written.
+        private func layTables(_ lines: [NoteMarkdown.Line], _ found: [Int: (block: Block, whole: NSRange)], in storage: NSTextStorage,
+                               within covered: NSRange?) {
+            let string = storage.string as NSString
+            var groups: [(whole: NSRange, rows: [NoteMarkdown.Line])] = []
+            for line in lines {
+                guard let entry = found[line.range.location], case .table = entry.block else { continue }
+                if let covered, NSIntersectionRange(entry.whole, covered).length == 0 { continue }
+                if let last = groups.last, last.whole == entry.whole { groups[groups.count - 1].rows.append(line) }
+                else { groups.append((entry.whole, [line])) }
+            }
+            let pad: CGFloat = 10
+            for group in groups where !editing(group.whole) {
+                var rows: [(line: NoteMarkdown.Line, cells: [NSRange], separator: Bool)] = []
+                for (index, line) in group.rows.enumerated() {
+                    let text = string.substring(with: line.range)
+                    if index == 1, NoteMarkdown.isTableSeparator(text) { rows.append((line, [], true)); continue }
+                    let cells = NoteMarkdown.tableCells(text).cells.map { NSRange(location: line.range.location + $0.location, length: $0.length) }
+                    if index == 0 {
+                        for cell in cells where cell.length > 0 {
+                            storage.enumerateAttribute(.font, in: cell) { value, range, _ in
+                                let font = (value as? NSFont) ?? tableFont
+                                guard font.pointSize > 1 else { return }
+                                storage.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask), range: range)
+                            }
+                        }
+                    }
+                    rows.append((line, cells, false))
+                }
+                let columns = rows.map(\.cells.count).max() ?? 0
+                guard columns > 0 else { continue }
+                var widths = Array(repeating: CGFloat(24), count: columns)
+                var measured: [[CGFloat]] = []
+                for row in rows {
+                    let sizes = row.cells.map { $0.length > 0 ? ceil(storage.attributedSubstring(from: $0).size().width) : 0 }
+                    measured.append(sizes)
+                    for (column, width) in sizes.enumerated() { widths[column] = max(widths[column], width) }
+                }
+                let total = widths.reduce(0, +) + CGFloat(columns) * pad * 2
+                guard total <= (view?.columnWidth ?? 760) - 4 else { continue }
+                for (index, row) in rows.enumerated() {
+                    var full = row.line.range
+                    if NSMaxRange(full) < string.length { full.length += 1 }
+                    if row.separator {
+                        storage.addAttributes([.font: hiddenFont, .foregroundColor: NSColor.clear, .paragraphStyle: flat], range: full)
+                        continue
+                    }
+                    let style = NSMutableParagraphStyle()
+                    style.paragraphSpacingBefore = 7
+                    style.paragraphSpacing = 7
+                    style.lineBreakMode = .byClipping
+                    storage.addAttribute(.paragraphStyle, value: style, range: full)
+                    var cursor = row.line.range.location
+                    var owed: CGFloat = 0
+                    for (column, cell) in row.cells.enumerated() {
+                        let gap = NSRange(location: cursor, length: cell.location - cursor)
+                        hide(gap, in: storage)
+                        if cell.length > 0 {
+                            if gap.length > 0 { storage.addAttribute(.kern, value: pad + owed, range: NSRange(location: NSMaxRange(gap) - 1, length: 1)) }
+                            owed = widths[column] - measured[index][column] + pad
+                        } else {
+                            owed += pad + widths[column] + pad
+                            if gap.length > 0 { storage.addAttribute(.kern, value: owed, range: NSRange(location: NSMaxRange(gap) - 1, length: 1)) }
+                            owed = 0
+                            cursor = NSMaxRange(cell)
+                            continue
+                        }
+                        storage.addAttribute(.kern, value: owed, range: NSRange(location: NSMaxRange(cell) - 1, length: 1))
+                        owed = 0
+                        cursor = NSMaxRange(cell)
+                    }
+                    hide(NSRange(location: cursor, length: NSMaxRange(row.line.range) - cursor), in: storage)
+                    let edges = widths.map { String(format: "%.1f", $0 + pad * 2) }.joined(separator: ",")
+                    storage.addAttribute(.noteDraw, value: "trow:\(index == 0 ? "h" : "b"):" + edges, range: row.line.range)
+                }
+            }
         }
 
         private func decorateMarker(_ line: NoteMarkdown.Line, marker: NSRange, showMarks: Bool, in storage: NSTextStorage) {
@@ -388,7 +759,28 @@ struct NoteEditorView: NSViewRepresentable {
                 storage.addAttributes([.font: monoFont, .backgroundColor: quiet.withAlphaComponent(0.14)], range: content)
                 hideMarks()
             case .math:
-                storage.addAttributes([.font: monoFont, .foregroundColor: accent], range: content)
+                // A formula among words: its picture, in the room of its hidden source, once it's made.
+                let source = (storage.string as NSString).substring(with: content)
+                if !showMarks, let image = NoteRenders.shared.math(source, display: false, color: ink) {
+                    let size = fitted(image.size, maxHeight: 60)
+                    hide(span.range, in: storage)
+                    storage.addAttribute(.kern, value: size.width + 2, range: NSRange(location: NSMaxRange(span.range) - 1, length: 1))
+                    storage.addAttribute(.noteImage, value: NoteImage(image: image, size: size, inline: true), range: span.range)
+                    if size.height > 20, let current = storage.attribute(.paragraphStyle, at: span.range.location, effectiveRange: nil) as? NSParagraphStyle {
+                        let style = current.mutableCopy() as! NSMutableParagraphStyle
+                        style.minimumLineHeight = max(style.minimumLineHeight, size.height + 2)
+                        let paragraph = (storage.string as NSString).paragraphRange(for: span.range)
+                        storage.addAttribute(.paragraphStyle, value: style, range: paragraph)
+                    }
+                } else {
+                    storage.addAttributes([.font: monoFont, .foregroundColor: accent], range: content)
+                    hideMarks()
+                }
+            case .footnote:
+                storage.addAttributes([.font: NSFont.systemFont(ofSize: 11, weight: .medium), .baselineOffset: 6, .foregroundColor: accent], range: content)
+                hideMarks()
+            case .comment:
+                storage.addAttributes([.foregroundColor: quiet.withAlphaComponent(0.65), .obliqueness: 0.12], range: span.range)
                 hideMarks()
             case .tag:
                 storage.addAttributes([.foregroundColor: accent, .backgroundColor: accent.withAlphaComponent(0.1)], range: span.range)
@@ -419,7 +811,38 @@ struct NoteEditorView: NSViewRepresentable {
         private func embed(_ target: String, line: NoteMarkdown.Line, showMarks: Bool, in storage: NSTextStorage) {
             let string = storage.string as NSString
             let paragraphRange = string.paragraphRange(for: line.range)
-            guard let file = library.attachment(named: target, from: parent.url), let size = view?.pictureSize(file) else {
+            guard let file = library.attachment(named: target, from: parent.url) else {
+                storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
+                return
+            }
+            func shown(_ image: NSImage, size: NSSize, link: String?) {
+                let style = paragraph(after: size.height + 14)
+                storage.addAttributes([.paragraphStyle: style, .noteImage: NoteImage(image: image, size: size, inline: false, link: link)],
+                                      range: paragraphRange)
+                if showMarks { storage.addAttributes([.foregroundColor: quiet, .font: NSFont.systemFont(ofSize: 13)], range: line.range) }
+                else { hide(line.range, in: storage) }
+            }
+            if file.pathExtension.lowercased() == "md" {
+                let raw = string.substring(with: line.range)
+                if file.lastPathComponent.lowercased().hasSuffix(".excalidraw.md") {
+                    // A drawing: its picture, once made (a click opens it to draw).
+                    if let image = DrawingPreviews.preview(file) {
+                        shown(image, size: fitted(image.size, maxHeight: 560), link: NotesLibrary.title(of: file))
+                    } else {
+                        storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
+                    }
+                    return
+                }
+                // Another note (or a part of it, "![[note#heading]]"): its words in a card; a click opens it.
+                var section: String?
+                if let hash = raw.range(of: #"#([^\]|]+)"#, options: .regularExpression) {
+                    section = String(raw[hash].dropFirst()).trimmingCharacters(in: .whitespaces)
+                }
+                let card = noteCard(file, section: section)
+                shown(card, size: card.size, link: NotesLibrary.title(of: file))
+                return
+            }
+            guard let size = view?.pictureSize(file) else {
                 storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
                 return
             }
@@ -430,6 +853,58 @@ struct NoteEditorView: NSViewRepresentable {
             } else {
                 hide(line.range, in: storage)
             }
+        }
+
+        private var cards: [String: NSImage] = [:]
+
+        /// A note shown inside another: its name and first lines (or one heading's part) on a card.
+        private func noteCard(_ url: URL, section: String?) -> NSImage {
+            let width = max(240, (view?.columnWidth ?? 760) - 4)
+            let key = "\(url.path)#\(section ?? "")|\(library.modifiedDate(url).timeIntervalSince1970)|\(Int(width))|\(theme.dark)"
+            if let known = cards[key] { return known }
+            var lines = library.readableLines(url)
+            if let section, let text = library.read(url) {
+                let headings = NoteMarkdown.headings(text)
+                if let index = headings.firstIndex(where: { $0.title.caseInsensitiveCompare(section) == .orderedSame }) {
+                    let start = NSMaxRange(headings[index].range)
+                    let end = headings[(index + 1)...].first { $0.level <= headings[index].level }?.range.location ?? (text as NSString).length
+                    let part = (text as NSString).substring(with: NSRange(location: start, length: max(0, end - start)))
+                    let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("asmo-section-\(abs(key.hashValue)).md")
+                    if (try? part.write(to: scratch, atomically: true, encoding: .utf8)) != nil {
+                        lines = library.readableLines(scratch)
+                        try? FileManager.default.removeItem(at: scratch)
+                    }
+                }
+            }
+            var body = lines.prefix(10).joined(separator: "\n")
+            if body.count > 700 { body = String(body.prefix(700)) + "…" } else if lines.count > 10 { body += "\n…" }
+            let text = NSMutableAttributedString()
+            let titleStyle = NSMutableParagraphStyle()
+            titleStyle.paragraphSpacing = 8
+            text.append(NSAttributedString(string: NotesLibrary.title(of: url) + (section.map { " › " + $0 } ?? "") + "\n",
+                                           attributes: [.font: NSFont.systemFont(ofSize: 14, weight: .semibold), .foregroundColor: ink,
+                                                        .paragraphStyle: titleStyle]))
+            let bodyStyle = NSMutableParagraphStyle()
+            bodyStyle.lineSpacing = 4
+            text.append(NSAttributedString(string: body.isEmpty ? String(localized: "（空笔记）") : body,
+                                           attributes: [.font: NSFont.systemFont(ofSize: 13.5), .foregroundColor: ink.withAlphaComponent(0.72),
+                                                        .paragraphStyle: bodyStyle]))
+            let inner = width - 40
+            let height = ceil(text.boundingRect(with: NSSize(width: inner, height: 2000), options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 32
+            let fill = NSColor(theme.sidebar)
+            let line = NSColor(theme.line)
+            let bar = accent
+            let image = NSImage(size: NSSize(width: width, height: height), flipped: true) { rect in
+                let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+                fill.setFill(); shape.fill()
+                line.setStroke(); shape.lineWidth = 1; shape.stroke()
+                bar.withAlphaComponent(0.6).setFill()
+                NSRect(x: 0, y: 8, width: 3, height: rect.height - 16).fill()
+                text.draw(with: NSRect(x: 22, y: 16, width: inner, height: rect.height - 28), options: [.usesLineFragmentOrigin, .usesFontLeading])
+                return true
+            }
+            cards[key] = image
+            return image
         }
 
         // MARK: Editing
@@ -470,6 +945,7 @@ struct NoteEditorView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !styling, let view, let storage = view.textStorage else { return }
             view.updateSuggestions()
+            publishStyle()
             guard view.engaged else { return }
             let string = storage.string as NSString
             let at = min(view.selectedRange().location, string.length)
@@ -483,7 +959,9 @@ struct NoteEditorView: NSViewRepresentable {
 
         private func outlineNow() {
             guard let view else { return }
-            parent.outline.headings = NoteMarkdown.headings(view.string)
+            let headings = NoteMarkdown.headings(view.string)
+            if parent.outline.headings != headings { parent.outline.headings = headings }
+            trackHeading()
         }
 
         func go(to range: NSRange) {
@@ -571,6 +1049,83 @@ final class NoteTextView: NSTextView {
 
     /// The width of the column of text (set from the window; pictures are sized to it).
     var columnWidth: CGFloat = 760
+    /// The note's name above the text (scrolls with it).
+    var header: NSHostingView<AnyView>?
+    private var pendingRestyle: DispatchWorkItem?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutColumn()
+    }
+
+    /// A column of comfortable width, centred in the window, with the name above it; pictures are sized to the
+    /// column, so a new width draws them again.
+    func layoutColumn() {
+        let width = enclosingScrollView?.contentView.bounds.width ?? bounds.width
+        guard width > 100 else { return }
+        let column = max(200, min(760, width - 96))
+        let side = max(48, (width - column) / 2)
+        var top: CGFloat = 28
+        if let header {
+            let height = max(44, header.fittingSize.height)
+            let frame = NSRect(x: side, y: 34, width: column, height: height)
+            if header.frame != frame { header.frame = frame }
+            top = 34 + height + 22
+        }
+        if abs(textContainerInset.width - side) > 0.5 || abs(textContainerInset.height - top) > 0.5 {
+            textContainerInset = NSSize(width: side, height: top)
+        }
+        if abs(columnWidth - column) > 1 {
+            columnWidth = column
+            pendingRestyle?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.coordinator?.restyle() }
+            pendingRestyle = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        }
+    }
+
+    /// Makes the selected lines a heading of `level` (0: plain text again), as the style menu does.
+    func setHeading(_ level: Int) {
+        let text = string as NSString
+        let selection = selectedRange()
+        let covered = text.paragraphRange(for: selection)
+        let block = text.substring(with: covered)
+        var lines = block.components(separatedBy: "\n")
+        let trailing = block.hasSuffix("\n")
+        if trailing { lines.removeLast() }
+        let prefix = level > 0 ? String(repeating: "#", count: level) + " " : ""
+        var firstDelta = 0
+        let changed = lines.enumerated().map { index, line -> String in
+            guard lines.count == 1 || !line.trimmingCharacters(in: .whitespaces).isEmpty else { return line }
+            let rest = line.replacingOccurrences(of: #"^\s*(#{1,6}\s+|[-*+]\s+(\[[ xX]\]\s+)?|\d{1,3}[.)]\s+|>\s?)"#, with: "",
+                                                 options: .regularExpression)
+            let result = prefix + rest
+            if index == 0 { firstDelta = (result as NSString).length - (line as NSString).length }
+            return result
+        }
+        let replacement = changed.joined(separator: "\n") + (trailing ? "\n" : "")
+        guard replacement != block, shouldChangeText(in: covered, replacementString: replacement) else { return }
+        textStorage?.replaceCharacters(in: covered, with: replacement)
+        didChangeText()
+        if lines.count == 1 {
+            setSelectedRange(NSRange(location: max(covered.location, selection.location + firstDelta), length: selection.length))
+        } else {
+            setSelectedRange(NSRange(location: covered.location, length: (replacement as NSString).length - (trailing ? 1 : 0)))
+        }
+    }
+
+    /// Puts text where the caret is, on lines of its own (a table, a formula block), and the caret at `caret`
+    /// characters into it.
+    func insertBlock(_ block: String, caret: Int) {
+        let text = string as NSString
+        let at = selectedRange().location
+        let startsLine = at == 0 || text.character(at: at - 1) == 10
+        let lead = startsLine ? "" : "\n"
+        let endsLine = at >= text.length || text.character(at: at) == 10
+        let insertion = lead + block + (endsLine ? "" : "\n")
+        insertText(insertion, replacementRange: selectedRange())
+        setSelectedRange(NSRange(location: at + (lead as NSString).length + caret, length: 0))
+    }
 
     /// The size a picture is shown at: its own, no wider than the column, no taller than 520.
     func pictureSize(_ file: URL) -> NSSize? {
@@ -589,6 +1144,22 @@ final class NoteTextView: NSTextView {
         return image
     }
 
+    /// Where pictures that open a note were drawn (a click there opens it).
+    var linkedPictures: [String: NSRect] = [:]
+
+    /// A callout's colour, by its kind (as Obsidian colours them).
+    static func calloutColour(_ type: String) -> NSColor {
+        switch type {
+        case "tip", "hint", "important", "success", "check", "done": return .systemGreen
+        case "question", "help", "faq", "warning", "caution", "attention": return .systemOrange
+        case "failure", "fail", "missing", "danger", "error", "bug": return .systemRed
+        case "example": return .systemPurple
+        case "quote", "cite": return .systemGray
+        case "abstract", "summary", "tldr": return .systemTeal
+        default: return .systemBlue
+        }
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let layout = layoutManager, let container = textContainer, let storage = textStorage, storage.length > 0 else { return }
@@ -599,6 +1170,12 @@ final class NoteTextView: NSTextView {
         let quiet = coordinator?.quiet ?? .secondaryLabelColor
         let accent = coordinator?.accent ?? .controlAccentColor
         let left = origin.x, width = container.size.width
+        /// Each line of a run, in view coordinates.
+        func fragments(_ glyphRange: NSRange, _ body: @escaping (NSRect, NSRect) -> Void) {
+            layout.enumerateLineFragments(forGlyphRange: glyphRange) { line, used, _, _, _ in
+                body(line.offsetBy(dx: origin.x, dy: origin.y), used.offsetBy(dx: origin.x, dy: origin.y))
+            }
+        }
         storage.enumerateAttribute(.noteDraw, in: characters) { value, range, _ in
             guard let kind = value as? String else { return }
             let glyphRange = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
@@ -609,15 +1186,45 @@ final class NoteTextView: NSTextView {
                 .offsetBy(dx: origin.x, dy: origin.y)
             switch kind {
             case "code", "front":
-                // One block behind the lines (each line's own rect, run together).
-                let block = NSRect(x: left - 4, y: line.minY, width: width + 8, height: line.height)
+                // One block behind the lines.
                 (kind == "code" ? quiet.withAlphaComponent(0.1) : quiet.withAlphaComponent(0.07)).setFill()
-                block.intersection(rect).fill()
+                fragments(glyphRange) { line, _ in
+                    NSRect(x: left - 4, y: line.minY, width: width + 8, height: line.height).intersection(rect).fill()
+                }
+            case let value where value.hasPrefix("callout:"):
+                let colour = Self.calloutColour(String(value.dropFirst(8)))
+                fragments(glyphRange) { line, _ in
+                    colour.withAlphaComponent(0.1).setFill()
+                    NSRect(x: left, y: line.minY, width: width, height: line.height).intersection(rect).fill()
+                    colour.withAlphaComponent(0.75).setFill()
+                    NSRect(x: left, y: line.minY, width: 3, height: line.height).intersection(rect).fill()
+                }
             case "quote":
                 let lastGlyph = layout.glyphRange(forCharacterRange: NSRange(location: NSMaxRange(range) - 1, length: 1), actualCharacterRange: nil)
                 let bottom = layout.lineFragmentUsedRect(forGlyphAt: lastGlyph.location, effectiveRange: nil).maxY + origin.y
                 accent.withAlphaComponent(0.45).setFill()
                 NSRect(x: left + 2, y: used.minY + 2, width: 3, height: max(10, bottom - used.minY - 4)).fill()
+            case "rule":
+                quiet.withAlphaComponent(0.35).setFill()
+                NSRect(x: left, y: used.midY.rounded(), width: width, height: 1).fill()
+            case let value where value.hasPrefix("trow:"):
+                // A table row: its cells' lines, the header shaded.
+                let parts = value.split(separator: ":")
+                guard parts.count == 3 else { return }
+                let edges = parts[2].split(separator: ",").compactMap { Double($0) }.map { CGFloat($0) }
+                let total = edges.reduce(0, +)
+                let row = NSRect(x: left, y: line.minY, width: total, height: line.height)
+                if parts[1] == "h" { quiet.withAlphaComponent(0.1).setFill(); row.fill() }
+                quiet.withAlphaComponent(0.3).setStroke()
+                let path = NSBezierPath(rect: row.insetBy(dx: 0.5, dy: 0.5))
+                var x = left
+                for edge in edges.dropLast() {
+                    x += edge
+                    path.move(to: NSPoint(x: x.rounded() + 0.5, y: row.minY))
+                    path.line(to: NSPoint(x: x.rounded() + 0.5, y: row.maxY))
+                }
+                path.lineWidth = 1
+                path.stroke()
             case let value where value.hasPrefix("bullet:"):
                 let depth = Int(value.dropFirst(7)) ?? 0
                 let size: CGFloat = depth == 0 ? 6 : 5
@@ -653,11 +1260,45 @@ final class NoteTextView: NSTextView {
                 break
             }
         }
+        // Formulas, diagrams, drawings and notes shown in the note.
+        storage.enumerateAttribute(.noteImage, in: characters) { value, range, _ in
+            guard let picture = value as? NoteImage else { return }
+            let glyphRange = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.length > 0 else { return }
+            let used = layout.lineFragmentUsedRect(forGlyphAt: glyphRange.location, effectiveRange: nil).offsetBy(dx: origin.x, dy: origin.y)
+            var frame: NSRect
+            if picture.inline {
+                let glyph = layout.boundingRect(forGlyphRange: NSRange(location: glyphRange.location, length: 1), in: container)
+                    .offsetBy(dx: origin.x, dy: origin.y)
+                let baseline = layout.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil).minY + origin.y
+                    + layout.location(forGlyphAt: glyphRange.location).y
+                frame = NSRect(x: glyph.minX + 1, y: baseline - 5.5 - picture.size.height / 2, width: picture.size.width, height: picture.size.height)
+            } else {
+                let x = picture.centered ? left + (width - picture.size.width) / 2 : left
+                frame = NSRect(x: x, y: used.maxY + 6, width: picture.size.width, height: picture.size.height)
+            }
+            if let link = picture.link { linkedPictures[link] = frame }
+            guard frame.intersects(rect) else { return }
+            NSGraphicsContext.saveGraphicsState()
+            if picture.panel {
+                let card = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
+                NSColor.white.setFill(); card.fill()
+                card.addClip()
+            }
+            picture.image.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+                               hints: [.interpolation: NSImageInterpolation.high])
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     // Clicks: a box checks off; a [[link]] opens (⌘-click too, like Obsidian).
     override func mouseDown(with event: NSEvent) {
         engaged = true
+        let clicked = convert(event.locationInWindow, from: nil)
+        if let link = linkedPictures.first(where: { $0.value.contains(clicked) })?.key {
+            coordinator?.openLink(link)
+            return
+        }
         guard let storage = textStorage, storage.length > 0, let layout = layoutManager, let container = textContainer else {
             super.mouseDown(with: event); return
         }

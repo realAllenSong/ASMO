@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Virgil"; src: url("excalidraw-assets/Virgil.woff2") format("woff2"); }
+  @font-face { font-family: "Cascadia"; src: url("excalidraw-assets/Cascadia.woff2") format("woff2"); }
+  html, body, #app { margin: 0; height: 100%; width: 100%; overflow: hidden; background: transparent; }
+</style>
+<script>window.EXCALIDRAW_ASSET_PATH = "./";</script>
+<script src="react.production.min.js"></script>
+<script src="react-dom.production.min.js"></script>
+<script src="lz-string.min.js"></script>
+<script src="excalidraw.production.min.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+  // Excalidraw inside 逐日: a drawing from an Obsidian ".excalidraw.md" file, saved back the way the Obsidian
+  // Excalidraw plugin writes it (compressed JSON), so the same file opens there too.
+  const { Excalidraw, exportToBlob, serializeAsJSON } = ExcalidrawLib;
+  let root = null, api = null, timer = null, ready = false, last = "";
+
+  function post(message) {
+    const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.asmo;
+    if (handler) handler.postMessage(message);
+  }
+
+  function readScene(data, compressed) {
+    if (!data || !data.trim()) return { elements: [], appState: {}, files: {} };
+    const json = compressed ? LZString.decompressFromBase64(data.replace(/\s+/g, "")) : data;
+    return JSON.parse(json || "{}");
+  }
+
+  function texts(elements) {
+    return elements.filter(e => e.type === "text" && !e.isDeleted).map(e => ({ id: e.id, text: e.originalText || e.text || "" }));
+  }
+
+  function open(data, compressed, dark) {
+    let scene;
+    try { scene = readScene(data, compressed); } catch (error) { post({ type: "problem", message: String(error) }); return; }
+    const appState = Object.assign({}, scene.appState || {}, { theme: dark ? "dark" : "light", collaborators: new Map() });
+    const props = {
+      initialData: { elements: scene.elements || [], appState, files: scene.files || {}, scrollToContent: true },
+      langCode: "zh-CN",
+      theme: dark ? "dark" : "light",
+      excalidrawAPI: value => { api = value; },
+      onChange: () => {
+        if (!ready) return;
+        clearTimeout(timer);
+        timer = setTimeout(save, 700);
+      },
+      UIOptions: { canvasActions: { loadScene: false, saveToActiveFile: false, export: false, saveAsImage: true } },
+    };
+    if (!root) root = ReactDOM.createRoot(document.getElementById("app"));
+    root.render(React.createElement(Excalidraw, props));
+    setTimeout(() => { ready = true; last = current(); }, 900);
+  }
+
+  function current() {
+    if (!api) return "";
+    return serializeAsJSON(api.getSceneElements(), api.getAppState(), api.getFiles(), "local");
+  }
+
+  function save() {
+    const json = current();
+    if (!json || json === last) return;
+    last = json;
+    post({ type: "changed", data: LZString.compressToBase64(json), texts: texts(api.getSceneElements()) });
+  }
+
+  function flush() { clearTimeout(timer); if (ready) save(); }
+
+  // A picture of a drawing (for showing it inside a note), on white, at twice the size.
+  async function preview(data, compressed) {
+    try {
+      const scene = readScene(data, compressed);
+      const elements = (scene.elements || []).filter(e => !e.isDeleted);
+      if (!elements.length) return { ok: false, error: "empty" };
+      // The drawing's hand-written font, loaded before the picture is made.
+      await Promise.all(["20px Virgil", "20px Cascadia"].map(font => document.fonts.load(font).catch(() => null)));
+      const blob = await exportToBlob({
+        elements,
+        appState: Object.assign({}, scene.appState || {}, { exportBackground: true, viewBackgroundColor: "#ffffff", exportWithDarkMode: false }),
+        files: scene.files || {},
+        mimeType: "image/png",
+        getDimensions: (width, height) => ({ width: width * 2, height: height * 2, scale: 2 }),
+      });
+      const url = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
+      return { ok: true, png: String(url).split(",")[1] };
+    } catch (error) {
+      return { ok: false, error: String(error) };
+    }
+  }
+</script>
+</body>
+</html>

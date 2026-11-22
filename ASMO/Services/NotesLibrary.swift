@@ -316,6 +316,106 @@ final class NotesLibrary: ObservableObject {
         return name
     }
 
+    /// A new, empty drawing in the drawings folder (画板 or Excalidraw when there is one).
+    func createDrawing() throws -> URL {
+        guard let root else { throw Failure(message: "No notes folder.") }
+        let folder = ["画板", "Excalidraw"].map { root.appendingPathComponent($0) }
+            .first { FileManager.default.fileExists(atPath: $0.path) } ?? root
+        let stamp = Date.now.formatted(.verbatim("\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)).\(minute: .twoDigits)",
+                                                timeZone: .current, calendar: .current))
+        var url = folder.appendingPathComponent("画板 \(stamp).excalidraw.md")
+        var number = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("画板 \(stamp) \(number).excalidraw.md")
+            number += 1
+        }
+        try write(ExcalidrawFile.blank, to: url)
+        reload()
+        return url
+    }
+
+    // MARK: The home page
+
+    /// Notes opened lately, newest first (kept between launches).
+    private(set) var opened: [String] = UserDefaults.standard.stringArray(forKey: "notesOpened") ?? []
+
+    func noteOpened(_ url: URL) {
+        let key = path(of: url)
+        opened.removeAll { $0 == key }
+        opened.insert(key, at: 0)
+        opened = Array(opened.prefix(20))
+        if ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] == nil { UserDefaults.standard.set(opened, forKey: "notesOpened") }
+    }
+
+    /// The notes to go on with: the ones opened lately, then the ones written lately.
+    func recent(_ count: Int) -> [URL] {
+        var result: [URL] = []
+        let byPath = Dictionary(notes.map { (path(of: $0), $0) }, uniquingKeysWith: { a, _ in a })
+        for key in opened { if let url = byPath[key] { result.append(url) } }
+        for url in notes.sorted(by: { modifiedDate($0) > modifiedDate($1) }) where !result.contains(url) { result.append(url) }
+        return Array(result.prefix(count))
+    }
+
+    private var readable: [String: (stamp: Date, lines: [String])] = [:]
+
+    /// A note's lines as read: marks taken off, headings, pictures, properties, code and empty lines left out.
+    func readableLines(_ url: URL) -> [String] {
+        let stamp = modifiedDate(url)
+        if let known = readable[url.path], known.stamp == stamp { return known.lines }
+        let text = read(url) ?? ""
+        var lines: [String] = []
+        for line in NoteMarkdown.lines(text) {
+            switch line.kind {
+            case .text, .bullet, .task, .quote: break
+            default: continue
+            }
+            var words = (text as NSString).substring(with: line.range)
+            if let marker = line.marker { words = (text as NSString).substring(with: NSRange(location: NSMaxRange(marker), length: NSMaxRange(line.range) - NSMaxRange(marker))) }
+            words = words.replacingOccurrences(of: #"!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)"#, with: "", options: .regularExpression)
+            words = words.replacingOccurrences(of: #"\[\[([^\]|#]*)(#[^\]|]*)?\|?([^\]]*)\]\]"#, with: "$1$3", options: .regularExpression)
+            words = words.replacingOccurrences(of: #"\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+            words = words.replacingOccurrences(of: #"\*\*|__|~~|==|`"#, with: "", options: .regularExpression)
+            words = words.trimmingCharacters(in: .whitespaces)
+            if !words.isEmpty { lines.append(words) }
+        }
+        readable[url.path] = (stamp, lines)
+        return lines
+    }
+
+    /// The first words of a note, for a card.
+    func excerpt(_ url: URL, length: Int = 120) -> String {
+        var result = ""
+        for line in readableLines(url) {
+            result += (result.isEmpty ? "" : "  ") + line
+            if result.count >= length { break }
+        }
+        return String(result.prefix(length))
+    }
+
+    /// One line from a note worth reading again (long enough to say something), chosen by `seed`.
+    func quote(_ url: URL, seed: Int) -> String? {
+        let all = readableLines(url)
+        // A sentence: long enough, mostly words (no drawings in box characters, no bare links, nothing secret).
+        func sayable(_ line: String) -> Bool {
+            guard line.count >= 18, line.count <= 240, !line.hasPrefix("http") else { return false }
+            if line.range(of: #"[\x{2500}-\x{257F}→←↑↓┐┘└┌|]"#, options: .regularExpression) != nil { return false }
+            if line.range(of: #"(?i)密码|password|pwd|账号|token|key\s*[:：]"#, options: .regularExpression) != nil { return false }
+            let letters = line.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+            return Double(letters) / Double(line.unicodeScalars.count) > 0.6
+        }
+        let candidates = all.indices.filter { sayable(all[$0]) }
+        guard !candidates.isEmpty else { return nil }
+        // The line and what follows it, a short passage.
+        var index = candidates[abs(seed) % candidates.count]
+        var passage = all[index]
+        while passage.count < 90, index + 1 < all.count, sayable(all[index + 1]) || all[index + 1].count >= 6 {
+            index += 1
+            if all[index].range(of: #"(?i)密码|password|pwd"#, options: .regularExpression) != nil { break }
+            passage += "\n" + all[index]
+        }
+        return passage
+    }
+
     // MARK: Searching
 
     struct Hit: Identifiable {
