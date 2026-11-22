@@ -463,6 +463,8 @@ final class PageController: ObservableObject {
         change()
         storage.endEditing()
         textView.didChangeText()
+        // The selection's highlight and the line's new look drawn together (no old highlight left behind).
+        textView.setNeedsDisplay(textView.visibleRect)
     }
 }
 

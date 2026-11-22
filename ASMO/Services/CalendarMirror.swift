@@ -48,6 +48,14 @@ final class CalendarMirror {
                 mirror.schedule(after: 1.5)
             }
         })
+        // The Mac went to another time zone (New York to Beijing): the days are read in the new one, and the
+        // yearly dates are put at the moment their day begins there.
+        observers.append(NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                NSTimeZone.resetSystemTimeZone()
+                CalendarMirror.shared.schedule(after: 1)
+            }
+        })
         schedule(after: 3)
         // A change on the phone reaches this Mac through iCloud and is announced; a check every two minutes
         // catches one that wasn't (the Mac asleep, the notice dropped).
@@ -195,11 +203,21 @@ final class CalendarMirror {
         var copies: [UUID: [MirrorCopy]] = [:]
         var objects: [String: EKCalendarItem] = [:]
         let back = cal.date(byAdding: .day, value: -60, to: from) ?? from
+        var floated = false
         for event in store.events(matching: store.predicateForEvents(withStart: back, end: until, calendars: [calendar])) {
             guard let id = Self.marker(event), objects[event.calendarItemIdentifier] == nil else { continue }
+            // Events written before items' times floated: made floating once, at the same time on the clock.
+            if !oneWay.contains(id), !event.isAllDay, event.timeZone != nil {
+                let (start, end) = (event.startDate, event.endDate)
+                event.timeZone = nil
+                event.startDate = start
+                event.endDate = end
+                if (try? store.save(event, span: .thisEvent, commit: false)) != nil { floated = true }
+            }
             copies[id, default: []].append(MirrorCopy(item: Self.item(event, calendar: cal), identifier: event.calendarItemIdentifier))
             objects[event.calendarItemIdentifier] = event
         }
+        if floated { try store.commit() }
         for reminder in await reminders(in: list) {
             guard let id = Self.marker(reminder), let item = Self.item(reminder) else { continue }
             copies[id, default: []].append(MirrorCopy(item: item, identifier: reminder.calendarItemIdentifier))
@@ -412,6 +430,9 @@ final class CalendarMirror {
             let day = DateComponents(year: item.year, month: item.month, day: item.day)
             let start = item.start ?? 0
             let end = item.end ?? start + 60
+            // An item's time is the time on the clock wherever the Mac and the phone are (14:00 is 14:00 in New
+            // York and in Beijing): a floating event. A yearly date begins at a moment in its own zone: fixed.
+            event.timeZone = occasion ? cal.timeZone : nil
             event.isAllDay = item.start == nil
             event.startDate = cal.date(from: day).flatMap { cal.date(byAdding: .minute, value: start, to: $0) }
             event.endDate = cal.date(from: day).flatMap { cal.date(byAdding: .minute, value: end, to: $0) }

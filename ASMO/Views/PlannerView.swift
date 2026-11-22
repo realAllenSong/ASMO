@@ -363,6 +363,11 @@ struct PlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in returnAfterAway() }
         #endif
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in updateCurrentDay() }
+        // Another time zone (the Mac flown from New York to Beijing): "today" is the day there now.
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange).receive(on: RunLoop.main)) { _ in
+            NSTimeZone.resetSystemTimeZone()
+            updateCurrentDay()
+        }
         // The day-changed notice can be missed (asleep at midnight, clock changed): check now and then too.
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in updateCurrentDay() }
         #if os(macOS)

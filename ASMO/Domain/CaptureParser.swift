@@ -353,7 +353,7 @@ enum CaptureParser {
             if parts[1] == "凌晨", hour == 12 { hour = 0 }
             return (parts[0].count, hour, minute, valid, true)
         }
-        if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)?\s*(?:是|在)?\s*([一二两三四五六七八九十零〇\d]+)[点時时]钟?(?:(半|一刻|三刻)|([一二两三四五六七八九十零〇\d]+)分?)?"#),
+        if let parts = text.match(#"^(上午|早上|中午|下午|傍晚|晚上|凌晨)?\s*(?:是|在)?\s*([一二两三四五六七八九十零〇\d]+)\s*[点時时]钟?(?:(半|一刻|三刻)|([一二两三四五六七八九十零〇\d]+)分?)?"#),
            var hour = number(parts[2]) {
             let valid = parts[1].isEmpty || (1...12).contains(hour)
             if ["中午", "下午", "傍晚", "晚上"].contains(parts[1]), hour < 12,
@@ -367,7 +367,8 @@ enum CaptureParser {
             return (parts[0].count, hour % 12 + (parts[3].lowercased() == "pm" ? 12 : 0),
                     Int(parts[2]) ?? 0, (1...12).contains(hour), true)
         }
-        if let parts = text.match(#"^(?:at\s+)?(\d{1,2})[:：](\d{2})(?!\d)"#),
+        // "19:00" (and "19:00点", the clock written with the Chinese unit after it).
+        if let parts = text.match(#"^(?:at\s+)?(\d{1,2})[:：](\d{2})(?!\d)(?:[点時时]钟?)?"#),
            let hour = Int(parts[1]), let minute = Int(parts[2]) {
             return (parts[0].count, hour, minute, true, hour >= 12 || parts[1].hasPrefix("0"))
         }

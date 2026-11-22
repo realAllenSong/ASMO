@@ -404,6 +404,14 @@ final class DocScrollView: NSScrollView {
 }
 
 final class DocTextView: NSTextView {
+    /// A selection going away is drawn away everywhere it was: formatting it (striking a line through, which
+    /// redraws the line as done) can leave its old highlight on screen otherwise.
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        let had = selectedRanges.contains { $0.rangeValue.length > 0 }
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if had, !stillSelecting { setNeedsDisplay(visibleRect) }
+    }
+
     weak var coordinator: DocCoordinator?
     /// A hairline above every day but the first, across the column of text: the days read as entries, not as
     /// headings floating in the page (nil: none, as in a single day's page).
@@ -1288,7 +1296,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         guard parent.organizeWhenIdle else { return }
         let idle = DispatchWorkItem { [weak self] in self?.organize(includingCurrent: false) }
         idleOrganize = idle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: idle)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: idle)
     }
 
     /// Nothing is saved or organized while the writer is writing: the page is saved once the keys have been
@@ -1619,6 +1627,13 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         pendingSync?.cancel()
         idleOrganize?.cancel()
         syncEdits()
+        if waitingLine != nil {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reconciled = []
+                self.reconcile(self.parent.days)
+            }
+        }
         let cursor = view.selectedRange().location
         let candidates = paragraphs().filter { paragraph in
             // A bullet with nothing after it (Return pressed once too often) is not a thing to do.
@@ -2263,6 +2278,19 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
 
     func textViewDidChangeSelection(_ notification: Notification) {
         guard let textView = notification.object as? NSTextView, !applying else { return }
+        // The cursor left a line whose item changed while it was being written: drawn as the item is now.
+        if let waiting = waitingLine, let storage = textView.textStorage, storage.length > 0 {
+            let at = min(textView.selectedRange().location, storage.length - 1)
+            if storage.attribute(.asmoLine, at: at, effectiveRange: nil) as? String != waiting {
+                waitingLine = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self else { return }
+                    self.syncEdits()
+                    self.reconciled = []
+                    self.reconcile(self.parent.days)
+                }
+            }
+        }
         // The format bar follows a selection made with the keyboard too (a mouse selection shows it on mouse up).
         if NSEvent.pressedMouseButtons & 1 == 0 { (textView as? DocTextView)?.refreshSelectionBar(after: 0.25) }
         cleanTypingAttributes(textView)
@@ -2290,6 +2318,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
 
     /// Brings the document in line with stored data without disturbing the line being edited:
     /// redraws lines that changed elsewhere, adds lines for new items, removes lines for items that are gone.
+    /// An item line the store changed while the cursor was on it (drawn again when the cursor leaves).
+    private var waitingLine: String?
+
     func reconcile(_ days: [DocDay]) {
         guard let view, let storage = view.textStorage, !applying else { return }
         #if DEBUG
@@ -2317,7 +2348,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         var changed = false
         defer {
             applying = false
-            if changed { resetUndo() }
+            if changed { resetUndo(); view.setNeedsDisplay(view.visibleRect) }
         }
         // Redraw or remove, bottom-up.
         for paragraph in list.reversed() where !paragraph.isHeading {
@@ -2329,8 +2360,10 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
                     changed = true
                     drawn[id] = nil
                 } else if drawn[id] != line.signature && underCursor {
-                    // Left alone while being written in: look again next time.
+                    // Left alone while being written in: drawn again once the cursor leaves the line (a time
+                    // written over as "5点到7点半" then shows as 17:00–19:30).
                     reconciled = []
+                    waitingLine = id
                 } else if drawn[id] != line.signature {
                     var redrawn = line
                     redrawn.depth = paragraph.depth

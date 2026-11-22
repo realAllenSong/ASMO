@@ -38,6 +38,8 @@ struct TimeRangeFormsTests {
             ("下午2-3点 跟Li聊天", want), ("下午两点到三点 跟Li聊天", want), ("2pm-3pm 跟Li聊天", want), ("2pm - 3pm 跟Li聊天", want),
             ("2-3pm 跟Li聊天", want), ("2 pm-3 pm 跟Li聊天", want), ("2点到3点：跟Li聊天", want), ("2点到3点，跟Li聊天", want),
             ("2点钟到3点钟 跟Li聊天", want),
+            // A space before 点, and 点 after a clock time: no 点 is left in the words.
+            ("2-3 点 跟Li聊天", want), ("2 点到 3 点 跟Li聊天", want), ("14:00-15:00点跟Li聊天", want), ("14:00点-15:00点 跟Li聊天", want),
         ])
     }
 
