@@ -50,8 +50,8 @@ final class NotesLibrary: ObservableObject {
     private static func defaultRoot() -> URL? {
         // Testing (Debug, the test store) never touches the real notes: ASMO_TEST_NOTES names a copy.
         if let test = ProcessInfo.processInfo.environment["ASMO_TEST_NOTES"] { return URL(fileURLWithPath: test, isDirectory: true) }
-        if ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] != nil {
-            return AppPaths.support.appendingPathComponent("notes-test", isDirectory: true)
+        if let store = ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] {
+            return AppPaths.support.appendingPathComponent(store == "demo" ? "notes-demo" : "notes-test", isDirectory: true)
         }
         if let path = UserDefaults.standard.string(forKey: folderKey), FileManager.default.fileExists(atPath: path) {
             return URL(fileURLWithPath: path, isDirectory: true)

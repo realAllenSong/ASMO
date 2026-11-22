@@ -146,6 +146,7 @@ struct NoteEditorView: NSViewRepresentable {
             view.string = text
             styling = false
             caretLine = nil
+            view.engaged = false
             view.setSelectedRange(NSRange(location: 0, length: 0))
             restyle()
             view.undoManager?.removeAllActions()
@@ -469,6 +470,7 @@ struct NoteEditorView: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !styling, let view, let storage = view.textStorage else { return }
             view.updateSuggestions()
+            guard view.engaged else { return }
             let string = storage.string as NSString
             let at = min(view.selectedRange().location, string.length)
             let line = string.paragraphRange(for: NSRange(location: at, length: 0))
@@ -558,6 +560,13 @@ struct LinkSuggestionList: View {
 /// [[links]]; turns pasted or dropped pictures into files in the picture folder.
 final class NoteTextView: NSTextView {
     weak var coordinator: NoteEditorView.Coordinator?
+    /// The writer has clicked or typed in this note (until then no line shows its marks: a note opens as a page).
+    var engaged = false
+
+    override func keyDown(with event: NSEvent) {
+        engaged = true
+        super.keyDown(with: event)
+    }
     private var pictures: [String: NSImage] = [:]
 
     /// The width of the column of text (set from the window; pictures are sized to it).
@@ -648,6 +657,7 @@ final class NoteTextView: NSTextView {
 
     // Clicks: a box checks off; a [[link]] opens (⌘-click too, like Obsidian).
     override func mouseDown(with event: NSEvent) {
+        engaged = true
         guard let storage = textStorage, storage.length > 0, let layout = layoutManager, let container = textContainer else {
             super.mouseDown(with: event); return
         }

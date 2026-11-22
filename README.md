@@ -38,10 +38,16 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
   <br/><sub>The document, with made-up items.</sub>
 </p>
 
+<p align="center">
+  <img src="assets/notes.png" width="800" alt="A note open in ASMO: its folder tree in the sidebar, the note's headings in the margin, a list, a checklist, a highlight and links to other notes" />
+  <br/><sub>Notes, next to the days. An Obsidian vault works as it is.</sub>
+</p>
+
 ## Features
 
 - **One document:** days follow each other in one scrolling page, today first, and it runs on as you scroll: every day ahead is there to write on. Days behind today are all there too, written on or not. A sidebar lists the months by year (a year folds away), two years ahead included, and **This month** brings you back.
 - **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own and move into time order; headings, quotes and links stay notes. A time without morning or evening reads the way it's said: one to six is the afternoon, and today a morning hour already gone by is the evening ("10" written at 7 pm is 10 pm).
+- **Notes:** a folder of Markdown files beside the days, for everything that isn't tied to a day. It's edited as Markdown with a live preview (the marks show on the line you're on), so an Obsidian vault works as it is: `[[links]]` with suggestions as you type, `![[pictures]]` shown under their line (paste or drop one in), checklists, highlights, a contents of the note's headings in the margin, ⌘P to find a note by name or by what's in it. A folder that's a Git repository syncs with its remote by itself, so Obsidian on the phone sees what you wrote.
 - **Formatting:** bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type.
 - **Repeats without syntax:** the repeat button turns the line into a routine: daily, weekdays, weekly on that day, or monthly on that date. Routines can be skipped for one day.
 - **Subtasks:** items nest up to three levels; an indented line belongs to the one above.
@@ -131,6 +137,15 @@ asmo page today                # the page as blocks b1, b2, … each with its Ma
 asmo page set today b2 <<< "Shipping **v1.0** on Monday."
 asmo attach ~/Desktop/photo.jpg --day today --caption "whiteboard"
 ````
+
+Notes work the same way:
+
+```bash
+asmo notes                                   # every note, by path
+asmo note 'Launch plan'                      # its Markdown
+asmo note write Ideas --append <<< "- A new idea"
+asmo note search pricing
+```
 
 `asmo help` lists everything, including routines and important dates.
 

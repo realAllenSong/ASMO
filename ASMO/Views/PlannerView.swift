@@ -5338,7 +5338,7 @@ struct PaperContentsSidebar: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Button(action: showDays) {
-                    Text("日程").font(.system(size: 12, weight: .semibold))
+                    Text("日程目录").font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(showingDays ? theme.accent : theme.quiet)
                 }
                 .buttonStyle(.plain).help("回到日程")

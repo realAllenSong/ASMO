@@ -13,6 +13,7 @@
 - Agent surface: `asmo today | day | list | search | add | set | done | rm | page | pages | attach | routine | date | undo | mirror | mcp`. Answers are JSON.
 - Day pages: written in Markdown (headings, emphasis, links, lists, checkboxes, quotes, tables, code blocks, pictures by path or URL, mermaid diagrams drawn by a bundled copy of mermaid). Read back as blocks b1, b2… that can be replaced or removed one at a time.
 - Important dates: yearly, Gregorian or Chinese lunar, each kept in a time zone (`asmo date add … --zone Asia/Shanghai`, `asmo date set`); shown and put in Apple Calendar at the moment the day begins there.
+- Notes: a folder of Markdown files (an Obsidian vault works as it is: [[links]], ![[pictures]]), edited with a live preview; `asmo notes`, `asmo note PATH`, `asmo note write PATH [--append|--new]`, `asmo note search`, `asmo note mv`, `asmo note rm`; MCP: list_notes, read_note, write_note, search_notes, move_note, remove_note. A Git-repository folder syncs with its remote by itself.
 - Undo: `asmo undo` takes back changes made through the command until the app restarts.
 - Interface: English and Chinese; content is never translated.
 
