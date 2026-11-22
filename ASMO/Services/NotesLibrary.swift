@@ -198,8 +198,16 @@ final class NotesLibrary: ObservableObject {
         var target = url.deletingLastPathComponent().appendingPathComponent(clean)
         if !isFolder { target.appendPathExtension(url.pathExtension.isEmpty ? "md" : url.pathExtension) }
         guard target.standardizedFileURL != url.standardizedFileURL else { return url }
-        guard !FileManager.default.fileExists(atPath: target.path) else { throw Failure(message: "「\(clean)」 already exists.") }
-        try FileManager.default.moveItem(at: url, to: target)
+        // Only the case changes ("small talk" → "Small Talk"): the same file to this file system, renamed in two steps.
+        let caseOnly = target.standardizedFileURL.path.lowercased() == url.standardizedFileURL.path.lowercased()
+        guard caseOnly || !FileManager.default.fileExists(atPath: target.path) else { throw Failure(message: "「\(clean)」 already exists.") }
+        if caseOnly {
+            let step = url.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+            try FileManager.default.moveItem(at: url, to: step)
+            try FileManager.default.moveItem(at: step, to: target)
+        } else {
+            try FileManager.default.moveItem(at: url, to: target)
+        }
         if !isFolder { relink(from: Self.title(of: url), to: Self.title(of: target)) }
         reload()
         NotesGit.shared.noteWritten()
