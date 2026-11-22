@@ -16,6 +16,8 @@ sleep 0.7
 /usr/bin/open -g -n --env ASMO_TEST_STORE=demo "$app" --args -AppleLanguages "(en)" -desktopAppearance light
 sleep 4
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$app" || true
+# The days, whatever was showing when the app was last left (notes, a note).
+printf 'note:days' > "$caches/asmo-nav.txt"; sleep 1.5
 
 # Each frame from the same place: today's heading at the top of the window.
 snap() { printf 'ed:scrollto:· Today' > "$caches/asmo-nav.txt"; sleep 1; script/snapshot.sh "$work/$1.png"; }

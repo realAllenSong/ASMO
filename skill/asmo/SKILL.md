@@ -118,7 +118,11 @@ asmo date rm 4778
 ## Notes (the user's notes: Markdown files, an Obsidian vault)
 
 Besides the days, 逐日 keeps the user's notes (accounts, spending, study notes, ideas) as Markdown files in a
-folder. They use Obsidian syntax: `[[Note]]` links, `![[picture.png]]` pictures, `$math$`, `- [ ]` tasks.
+folder. They use Obsidian syntax, and 逐日 draws all of it in place: `[[Note]]` links, `![[picture.png]]` pictures,
+`![[Other note]]` / `![[Other note#Heading]]` embeds, `- [ ]` tasks, `## headings` (listed in the sidebar), tables,
+callouts (`> [!tip] Title` then `> lines`), fenced code (coloured), `$x^2$` and `$$` blocks (KaTeX), ```` ```mermaid ````
+diagrams, `[^1]` footnotes, `%%comments%%`. Drawings are Obsidian Excalidraw files (`name.excalidraw.md`, embedded as
+`![[name.excalidraw]]`); don't write their JSON by hand, the user draws them in the app.
 
 ```bash
 asmo notes                         # every note, by path inside the folder

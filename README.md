@@ -39,16 +39,24 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 </p>
 
 <p align="center">
-  <img src="assets/notes.png" width="800" alt="A note open in ASMO: its folder tree in the sidebar, the note's headings in the margin, a list, a checklist, a highlight and links to other notes" />
-  <br/><sub>Notes, next to the days. An Obsidian vault works as it is.</sub>
+  <img src="assets/notes-home.png" width="800" alt="The notes' home page in ASMO: a search box for notes and days, cards of the notes to go on with, a few lines from older notes to read again, and every folder with its notes" />
+  <br/><sub>The notes' home page: what to go on with, a few lines from before, every folder at a glance.</sub>
+</p>
+
+<p align="center">
+  <img src="assets/notes.png" width="800" alt="A note open in ASMO: the note's headings under it in the sidebar, a callout, a table drawn as a table, an inline formula and a formula block, and a mermaid diagram" />
+  <br/><sub>A note: tables, callouts, formulas and diagrams drawn in place, all of it plain Markdown that Obsidian opens too.</sub>
 </p>
 
 ## Features
 
 - **One document:** days follow each other in one scrolling page, today first, and it runs on as you scroll: every day ahead is there to write on. Days behind today are all there too, written on or not. A sidebar lists the months by year (a year folds away), two years ahead included, and **This month** brings you back.
 - **Write, then it's sorted:** finished lines become to-dos and scheduled items on their own and move into time order; headings, quotes and links stay notes. A time without morning or evening reads the way it's said: one to six is the afternoon, and today a morning hour already gone by is the evening ("10" written at 7 pm is 10 pm).
-- **Notes:** a folder of Markdown files beside the days, for everything that isn't tied to a day. It's edited as Markdown with a live preview (the marks show on the line you're on), so an Obsidian vault works as it is: `[[links]]` with suggestions as you type, `![[pictures]]` shown under their line (paste or drop one in), checklists, highlights, a contents of the note's headings in the margin, ⌘P to find a note by name or by what's in it. A folder that's a Git repository syncs with its remote by itself, so Obsidian on the phone sees what you wrote.
-- **Formatting:** bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type.
+- **Notes:** a folder of Markdown files beside the days, for everything that isn't tied to a day, so an Obsidian vault works as it is. Their home page shows the notes to go on with, a few lines written long ago to read again (new ones every day), and every folder with what's in it. A note is edited as Markdown with a live preview (the marks show on the line you're on): Text and Heading 1–4 from the toolbar, like a word processor, with the open note's headings listed under it in the sidebar to jump to; `[[links]]` with suggestions as you type, `![[pictures]]` (paste or drop one in), checklists, highlights, tables drawn as tables, callouts (`> [!tip]`), coloured code, footnotes, formulas (`$…$` and `$$`, drawn by a copy of KaTeX in the app), mermaid diagrams, and other notes shown inside a note (`![[note]]`).
+- **Drawings:** Excalidraw is built in. Open a drawing from the vault or start one from the toolbar, and it's saved the way Obsidian's Excalidraw plugin saves it, so the same file opens there; a note that embeds it shows it as a picture.
+- **Search everything:** ⌘P finds a note by name, a line in any note, or a to-do on any day, and opens it at that line.
+- **Notes sync through Git:** a folder that's a Git repository is committed, pulled and pushed by itself, so Obsidian on the phone sees what you wrote. The days never go there; they go to Apple Calendar and Reminders.
+- **Formatting:** on the days, bold, italic, underline, strike, highlight, colours, headings, lists, checkboxes, links and pictures from the toolbar, or Markdown as you type. In a note, the toolbar writes Markdown: paragraph styles, lists, quotes, callouts, tables, formulas, code, drawings.
 - **Repeats without syntax:** the repeat button turns the line into a routine: daily, weekdays, weekly on that day, or monthly on that date. Routines can be skipped for one day.
 - **Subtasks:** items nest up to three levels; an indented line belongs to the one above.
 - **Important dates, in their own time zone:** birthdays, anniversaries and holidays come back every year, in the Gregorian or the Chinese lunar calendar. Each is kept in a time zone and shown when its day begins there: a birthday in China on the 22nd is at 11:00 on the 21st in New York. It is put in Apple Calendar at that moment, with an alert.
@@ -186,4 +194,4 @@ The app is Swift, SwiftUI and SwiftData, with an AppKit text view for the day pa
 
 ## Acknowledgments
 
-Diagrams are drawn with [mermaid](https://github.com/mermaid-js/mermaid) (MIT), which ships inside the app.
+Diagrams are drawn with [mermaid](https://github.com/mermaid-js/mermaid) (MIT), formulas with [KaTeX](https://github.com/KaTeX/KaTeX) (MIT), and drawings with [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT), which run on [React](https://github.com/facebook/react) (MIT) and [lz-string](https://github.com/pieroxy/lz-string) (MIT); all of them ship inside the app.

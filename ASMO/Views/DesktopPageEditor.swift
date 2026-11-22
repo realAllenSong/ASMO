@@ -852,7 +852,8 @@ struct NoteStyleMenu: View {
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
             .foregroundStyle(theme.ink.opacity(0.8))
-            .frame(width: 78, height: 30)
+            .padding(.horizontal, 8)
+            .frame(minWidth: 78, minHeight: 30)
             .contentShape(Rectangle())
         }
         .menuStyle(.button)
