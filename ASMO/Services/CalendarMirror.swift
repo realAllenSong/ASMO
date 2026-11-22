@@ -451,7 +451,8 @@ final class CalendarMirror {
     /// A change made in Calendar or Reminders, applied to the item: its title, day and time, and done.
     private func apply(_ item: MirrorItem, to task: TaskRecord) {
         let title = item.plainTitle.trimmed
-        if !title.isEmpty { task.title = title }
+        // The phone shows a title without its [[note]] links: the same words back keep the links.
+        if !title.isEmpty, title != MirrorItem.phoneTitle(task.title) { task.title = title }
         var plan = PlanDate(year: item.year, month: item.month, day: item.day)
         if item.kind == .event, let start = item.start {
             plan.hour = start / 60

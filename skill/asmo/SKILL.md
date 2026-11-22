@@ -140,6 +140,8 @@ asmo note rm 归档/旧想法              # to the Trash
 
 - Write the note as the whole Markdown file (`--append` to add, never rewrite a note to add one line).
 - A schedule item belongs on a day (`asmo add`); a note is for what isn't tied to a day.
+- To join a to-do to a note, put `[[Note name]]` in its title (`asmo add "Prepare the talk [[Talk outline]]"`): the
+  user clicks it in the days to open the note. The phone shows the title without the link.
 - The folder syncs with GitHub by itself (the phone reads it with Obsidian); nothing to do for that.
 
 ## Routines (repeating items)

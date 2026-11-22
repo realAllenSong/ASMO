@@ -83,6 +83,10 @@ struct DocActions {
     var navigate: (Int) -> Void = { _ in }
     /// The cursor went into this day's page (the toolbar and the microphone follow it).
     var focused: (PlanDate) -> Void = { _ in }
+    /// A note opened full size among the notes (from the note window by a [[link]]).
+    var openNote: (URL) -> Void = { _ in }
+    /// A line made a yearly date ("#" → 生日 / 纪念日): its words, on its day's month and date.
+    var yearly: (_ title: String, _ day: PlanDate, _ kind: ImportantDateKind) -> Void = { _, _, _ in }
 }
 
 /// What a finished line of free writing is.
@@ -404,6 +408,16 @@ final class DocScrollView: NSScrollView {
 }
 
 final class DocTextView: NSTextView {
+    /// The "#" menu by the cursor (see DocLinks.swift), and the note window opened from a [[link]].
+    var hashPanel: NSPanel?
+    let hashModel = HashMenuModel()
+    var notePeek: NSPopover?
+
+    override func doCommand(by selector: Selector) {
+        if hashMenuCommand(selector) { return }
+        super.doCommand(by: selector)
+    }
+
     /// A selection going away is drawn away everywhere it was: formatting it (striking a line through, which
     /// redraws the line as done) can leave its old highlight on screen otherwise.
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
@@ -541,6 +555,7 @@ final class DocTextView: NSTextView {
 
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
+        hideHashMenu()
         if ok { coordinator?.organize(includingCurrent: true) }
         return ok
     }
@@ -983,6 +998,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             text.append(NSAttributedString(string: "\n", attributes: bodyAttributes))
         }
         storage.setAttributedString(text)
+        linkNotes()
         view.typingAttributes = bodyAttributes
         organizeUndoArmed = false
         resetUndo()
@@ -1289,7 +1305,9 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         if let view, let storage = view.textStorage, storage.length > 0 {
             let paragraph = (storage.string as NSString).paragraphRange(for: NSRange(location: min(view.selectedRange().location, storage.length - 1), length: 0))
             Self.strikeQuietly(storage, in: paragraph, quiet: quiet, ink: ink)
+            linkNotes(in: paragraph)
         }
+        (view as? DocTextView)?.updateHashMenu()
         scheduleSync()
         // A pause in writing is when the finished lines get organized (never the line being written).
         idleOrganize?.cancel()
@@ -2259,7 +2277,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
 
     /// The day a position is in: the nearest date heading above it. Looked up on every cursor move, so it only
     /// walks up the few lines to that heading (never reads the whole page).
-    private func day(at location: Int) -> PlanDate? {
+    func day(at location: Int) -> PlanDate? {
         guard let storage = view?.textStorage, storage.length > 0 else { return nil }
         let string = storage.string as NSString
         var probe = min(location, string.length - 1)
@@ -2276,8 +2294,14 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         }
     }
 
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        if let url = link as? URL, openNoteLink(url, at: charIndex) { return true }
+        return false
+    }
+
     func textViewDidChangeSelection(_ notification: Notification) {
         guard let textView = notification.object as? NSTextView, !applying else { return }
+        (textView as? DocTextView)?.updateHashMenu()
         // The cursor left a line whose item changed while it was being written: drawn as the item is now.
         if let waiting = waitingLine, let storage = textView.textStorage, storage.length > 0 {
             let at = min(textView.selectedRange().location, storage.length - 1)
@@ -2348,7 +2372,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         var changed = false
         defer {
             applying = false
-            if changed { resetUndo(); view.setNeedsDisplay(view.visibleRect) }
+            if changed { linkNotes(); resetUndo(); view.setNeedsDisplay(view.visibleRect) }
         }
         // Redraw or remove, bottom-up.
         for paragraph in list.reversed() where !paragraph.isHeading {

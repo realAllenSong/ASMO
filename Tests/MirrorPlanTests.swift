@@ -190,3 +190,15 @@ struct MirrorPlanTests {
                 == [.release(id)])
     }
 }
+
+struct MirrorTitleTests {
+    @Test func linksStayOffThePhone() {
+        #expect(MirrorItem.phoneTitle("检查申请 [[检查申请]]") == "检查申请")
+        #expect(MirrorItem.phoneTitle("[[Launch plan]]") == "Launch plan")
+        #expect(MirrorItem.phoneTitle("Call [[Li|Li Wei]] about [[Lease]]") == "Call about")
+        #expect(MirrorItem.noteLinks("Call [[Li|Li Wei]] about [[Lease#Deposit]]") == ["Li", "Lease"])
+        let item = MirrorItem.from(title: "Read [[Pricing]]", year: 2026, month: 11, day: 22, hour: nil, minute: nil, endMinute: nil, done: false, notes: "")
+        #expect(item?.title == "Read")
+        #expect(item?.notes == "📝 Pricing")
+    }
+}

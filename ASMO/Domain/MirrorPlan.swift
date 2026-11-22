@@ -39,8 +39,15 @@ public struct MirrorItem: Codable, Equatable, Sendable {
     public static func from(title: String, year: Int, month: Int, day: Int?, hour: Int?, minute: Int?, endMinute: Int?,
                             done: Bool, notes: String) -> MirrorItem? {
         guard let day else { return nil }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // "[[note]]" links stay in 逐日: the phone shows the words, and the notes' names under them.
+        let trimmed = phoneTitle(title)
         guard !trimmed.isEmpty else { return nil }
+        let linked = noteLinks(title)
+        var notes = notes
+        if !linked.isEmpty, trimmed != title.trimmingCharacters(in: .whitespacesAndNewlines) {
+            let line = linked.map { "📝 " + $0 }.joined(separator: "\n")
+            notes = notes.isEmpty ? line : notes + "\n" + line
+        }
         if let hour {
             let start = hour * 60 + (minute ?? 0)
             let end = min(endMinute.flatMap { $0 > start ? $0 : nil } ?? start + 60, 24 * 60 - 1)
@@ -48,6 +55,28 @@ public struct MirrorItem: Codable, Equatable, Sendable {
                               start: start, end: end, done: done, notes: notes)
         }
         return MirrorItem(kind: .reminder, title: trimmed, year: year, month: month, day: day, done: done, notes: notes)
+    }
+
+    /// A title as the phone shows it: "[[note]]" links left out (their words shown when nothing else is written).
+    public static func phoneTitle(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]"#
+        let without = trimmed.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !without.isEmpty { return without }
+        // Only links: their names (or shown words) are the title.
+        return trimmed.replacingOccurrences(of: pattern, with: "$1", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The notes a title links to ("[[name]]" or "[[name|words]]").
+    public static func noteLinks(_ title: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"\[\[([^\[\]|#]+)[^\[\]]*\]\]"#) else { return [] }
+        let ns = title as NSString
+        return regex.matches(in: title, range: NSRange(location: 0, length: ns.length)).map {
+            ns.substring(with: $0.range(at: 1)).trimmingCharacters(in: .whitespaces)
+        }
     }
 
     /// The title without the ✓ an event carries when done.

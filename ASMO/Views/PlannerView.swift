@@ -910,6 +910,14 @@ struct PlannerView: View {
         (view as? NoteTextView)?.engaged = true
         switch verb {
         case "heading": pageController.noteHeading(Int(rest) ?? 0)
+        case "hash":
+            // The "#" menu's choices as shown, written to asmo-ed.txt.
+            let items = (view as? DocTextView)?.hashModel.items ?? []
+            let shown = (view as? DocTextView)?.hashPanel != nil
+            let peek = (view as? DocTextView)?.notePeek?.isShown == true
+            try? ((shown ? "shown" : "hidden") + (peek ? " peek\n" : "\n") + items.map { "\($0.title) | \($0.detail)" }.joined(separator: "\n"))
+                .write(to: out, atomically: true, encoding: .utf8)
+            return
         case "sel": if let range = find(rest) { view.setSelectedRange(range) }
         case "caret": if let range = find(rest) { view.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0)) }
         case "line": if let range = find(rest) { view.setSelectedRange(string.paragraphRange(for: range)) }
@@ -3453,6 +3461,14 @@ struct PlannerView: View {
                 #else
                 if editingDay != nil, editingDay != day { instantly { editingDay = day; selected = day } }
                 #endif
+            },
+            openNote: { url in openNote = url },
+            yearly: { title, day, kind in
+                let record = ImportantDateRecord(title: title, kind: kind,
+                                                 rule: ImportantDateRule(month: day.month, day: day.day ?? 1, year: nil, system: .gregorian))
+                context.insert(record)
+                persist()
+                announce(String(localized: "「\(title)」每年 \(day.month)月\(day.day ?? 1)日都会提醒"))
             })
     }
 
