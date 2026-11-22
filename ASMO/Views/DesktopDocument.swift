@@ -871,6 +871,12 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             if let notes = day.notes, let saved = try? NSAttributedString(
                 data: notes, options: [.documentType: NSAttributedString.DocumentType.rtfd], documentAttributes: nil) {
                 let note = NSMutableAttributedString(attributedString: saved)
+                // Bullets and words that came out in a label's small type (before that was fixed) are put right.
+                note.enumerateAttribute(.font, in: NSRange(location: 0, length: note.length)) { value, range, _ in
+                    guard let font = value as? NSFont else { return }
+                    let sized = Self.bodySized(font)
+                    if sized !== font { note.addAttribute(.font, value: sized, range: range) }
+                }
                 Self.neutralizeInk(note, ink: ink, quiet: quiet)
                 let dark = theme.dark
                 MainActor.assumeIsolated { DocPaste.redrawCards(in: note, dark: dark) }
@@ -1793,8 +1799,7 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
             }
             let line = NSMutableAttributedString(string: "\n" + indent, attributes: bodyAttributes)
             if let marker { line.append(marker) }
-            textView.insertText(line, replacementRange: selection)
-            textView.typingAttributes = bodyAttributes
+            insertStyled(line, in: textView, replacing: selection)
             return true
         case #selector(NSResponder.insertTab(_:)):
             shiftLevel(textView, by: 1)
@@ -1805,6 +1810,29 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         default:
             return false
         }
+    }
+
+    /// Inserts text that keeps exactly its own look. The text view otherwise gives what it inserts the size of the
+    /// text the cursor was next to: after a repeating line's small "# 每天", the next bullet came out small.
+    private func insertStyled(_ text: NSAttributedString, in textView: NSTextView, replacing range: NSRange) {
+        textView.typingAttributes = bodyAttributes
+        textView.insertText(text, replacementRange: range)
+        if let storage = textView.textStorage, range.location + text.length <= storage.length,
+           (storage.string as NSString).substring(with: NSRange(location: range.location, length: text.length)) == text.string {
+            storage.beginEditing()
+            text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attributes, piece, _ in
+                storage.setAttributes(attributes, range: NSRange(location: range.location + piece.location, length: piece.length))
+            }
+            storage.endEditing()
+        }
+        textView.typingAttributes = bodyAttributes
+    }
+
+    /// Writing is never smaller than the page's own size (only code is, in its own font): the size of a label
+    /// such as "# 每天", picked up by what was typed next to it, is put right.
+    static func bodySized(_ font: NSFont, body: CGFloat = 15) -> NSFont {
+        guard font.pointSize < body - 0.25, !font.isFixedPitch, !font.fontName.lowercased().contains("mono") else { return font }
+        return NSFontManager.shared.convert(font, toSize: body)
     }
 
     /// Bullets by level, the same for items and for bullets being typed.
@@ -1993,9 +2021,8 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
         if typed == " " || typed == "\u{3000}" {
             let bullets = ["-": "• ", "*": "• ", "+": "• ", "[]": "☐ ", "[ ]": "☐ ", "【】": "☐ ", "[x]": "☑ ", "[X]": "☑ "]
             if let marker = bullets[typedBody] {
-                textView.insertText(marker == "• " ? bullet(depth: indent.count) : NSAttributedString(string: marker, attributes: body),
-                                    replacementRange: NSRange(location: lineStart, length: typedBody.utf16.count))
-                textView.typingAttributes = bodyAttributes
+                insertStyled(marker == "• " ? bullet(depth: indent.count) : NSAttributedString(string: marker, attributes: body),
+                             in: textView, replacing: NSRange(location: lineStart, length: typedBody.utf16.count))
                 return true
             }
             let sizes: [String: CGFloat] = ["#": 19, "##": 17, "###": 16]
@@ -2042,14 +2069,20 @@ final class DocCoordinator: NSObject, NSTextViewDelegate, NSTextStorageDelegate 
     /// Typed text keeps the user's formatting but never item, heading or note markers.
     private func cleanTypingAttributes(_ textView: NSTextView) {
         var attributes = textView.typingAttributes
-        for key in [NSAttributedString.Key.asmoLine, .asmoKind, .asmoCheck, .asmoTag, .asmoDay, .asmoNote, .attachment, .cursor] {
+        // Next to a label the page draws (the "# 每天" of a repeating line, an item's time): writing is plain,
+        // not in the label's small or bold type.
+        if attributes[.asmoTag] != nil || attributes[.asmoTime] != nil {
+            attributes[.font] = bodyFont
+            attributes[.foregroundColor] = ink
+        }
+        for key in [NSAttributedString.Key.asmoLine, .asmoKind, .asmoCheck, .asmoTag, .asmoTime, .asmoDay, .asmoNote, .attachment, .cursor] {
             attributes[key] = nil
         }
         // After a day heading (or with no font) writing starts plain; a heading the writer made keeps its size.
         if textView.typingAttributes[.asmoDay] != nil || attributes[.font] == nil { attributes[.font] = bodyFont }
         // Typing goes on in the page's own font, not the substitute the last Chinese character was drawn with
         // (English after Chinese came out in PingFang).
-        if let font = attributes[.font] as? NSFont { attributes[.font] = SharedFonts.base(of: font) }
+        if let font = attributes[.font] as? NSFont { attributes[.font] = Self.bodySized(SharedFonts.base(of: font)) }
         if attributes[.strikethroughStyle] != nil { attributes[.strikethroughStyle] = nil; attributes[.foregroundColor] = ink }
         textView.typingAttributes = attributes
     }
