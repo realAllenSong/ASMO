@@ -115,6 +115,29 @@ asmo date rm 4778
   `"dayThere"`. Each one is also put in Apple Calendar at that moment, with an alert.
 - A lunar date imported together with a Gregorian one (`"also": "11-19"`) shows on both.
 
+## Notes (the user's notes: Markdown files, an Obsidian vault)
+
+Besides the days, 逐日 keeps the user's notes (accounts, spending, study notes, ideas) as Markdown files in a
+folder. They use Obsidian syntax: `[[Note]]` links, `![[picture.png]]` pictures, `$math$`, `- [ ]` tasks.
+
+```bash
+asmo notes                         # every note, by path inside the folder
+asmo notes 个人                    # the notes in one folder
+asmo note 账号                     # a note's Markdown, by name or by path ("个人/账号")
+asmo note write 个人/想法 --new <<'MD'
+## 一个想法
+- [ ] 先做这个
+MD
+asmo note write 想法 --append <<< "- 再加一条"     # add at the end
+asmo note search 选课               # names containing it, and lines that do
+asmo note mv 想法 归档/旧想法         # rename / move; [[links]] to it follow
+asmo note rm 归档/旧想法              # to the Trash
+```
+
+- Write the note as the whole Markdown file (`--append` to add, never rewrite a note to add one line).
+- A schedule item belongs on a day (`asmo add`); a note is for what isn't tied to a day.
+- The folder syncs with GitHub by itself (the phone reads it with Obsidian); nothing to do for that.
+
 ## Routines (repeating items)
 
 ```bash

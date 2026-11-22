@@ -172,6 +172,12 @@ final class AgentCommands {
         case "page-remove": return try removeBlocks(body)
         case "pages": return try listPages(body)
         case "page-import": return try await importPages(body)
+        case "notes": return try notesList(body)
+        case "note-read": return try noteRead(body)
+        case "note-write": return try noteWrite(body)
+        case "note-search": return try noteSearch(body)
+        case "note-move": return try noteMove(body)
+        case "note-remove": return try noteRemove(body)
         case "mirror":
             // Keep Apple Calendar and Reminders in step now, and say what that did.
             if let on = body["on"] as? Bool { UserDefaults.standard.set(on, forKey: CalendarMirror.enabledKey) }
@@ -540,6 +546,117 @@ final class AgentCommands {
 
     /// The days in a range that have a page, each with its length and first line (to see what's written where
     /// without reading every page).
+    // MARK: Notes (the Markdown files in the notes folder)
+
+    private var library: NotesLibrary { NotesLibrary.shared }
+
+    /// A note by path inside the folder ("个人/账号", ".md" optional) or by name.
+    private func noteURL(_ body: [String: Any], key: String = "note", mustExist: Bool = true) throws -> URL {
+        guard let raw = (body[key] as? String)?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            throw Failure(message: "A \"\(key)\" (the note's path or name) is needed.")
+        }
+        guard let root = library.root else { throw Failure(message: "No notes folder.") }
+        let path = raw.hasSuffix(".md") ? raw : raw + ".md"
+        let direct = root.appendingPathComponent(path)
+        // Just a name ("账号"): the note of that name wherever it is, before making one at the top of the folder.
+        if !FileManager.default.fileExists(atPath: direct.path), !raw.contains("/"), let found = library.note(named: raw) { return found }
+        if FileManager.default.fileExists(atPath: direct.path) || !mustExist {
+            guard direct.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path) else {
+                throw Failure(message: "Notes stay inside the notes folder.")
+            }
+            return direct
+        }
+        if let found = library.note(named: raw) { return found }
+        throw Failure(message: "No note 「\(raw)」.")
+    }
+
+    private func newNoteURL(_ body: [String: Any]) throws -> URL {
+        guard let raw = (body["note"] as? String)?.trimmingCharacters(in: .whitespaces), !raw.isEmpty, let root = library.root else {
+            throw Failure(message: "A \"note\" (the new note's path) is needed.")
+        }
+        let url = root.appendingPathComponent(raw.hasSuffix(".md") ? raw : raw + ".md")
+        guard url.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path) else { throw Failure(message: "Notes stay inside the notes folder.") }
+        return url
+    }
+
+    private func noteRow(_ url: URL) -> [String: Any] {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return ["note": library.path(of: url), "title": NotesLibrary.title(of: url),
+                "chars": (library.read(url) ?? "").count,
+                "modified": ((attributes?[.modificationDate] as? Date) ?? .distantPast).formatted(.iso8601)]
+    }
+
+    private func notesList(_ body: [String: Any]) throws -> [String: Any] {
+        library.reload()
+        let folder = (body["folder"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")) ?? ""
+        let notes = library.notes.filter { folder.isEmpty || library.path(of: $0).hasPrefix(folder + "/") }
+            .sorted { library.path(of: $0).localizedStandardCompare(library.path(of: $1)) == .orderedAscending }
+        return ["folder": library.root?.path ?? "", "notes": notes.map(noteRow)]
+    }
+
+    private func noteRead(_ body: [String: Any]) throws -> [String: Any] {
+        let url = try noteURL(body)
+        var row = noteRow(url)
+        row["markdown"] = library.read(url) ?? ""
+        return row
+    }
+
+    /// Writes a note: the whole text ("replace", the default), added at the end ("append"), or a new note
+    /// ("create": fails if one is there).
+    private func noteWrite(_ body: [String: Any]) throws -> [String: Any] {
+        let mode = body["mode"] as? String ?? "replace"
+        // A new note is made where it's named, even if a note of that name is elsewhere.
+        let url = mode == "create" ? try newNoteURL(body) : try noteURL(body, mustExist: false)
+        let text = body["markdown"] as? String ?? ""
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        if mode == "create", exists { throw Failure(message: "「\(library.path(of: url))」 already exists.") }
+        let before = exists ? library.read(url) : nil
+        var output = text
+        if mode == "append", let before, !before.isEmpty {
+            output = before + (before.hasSuffix("\n") ? "" : "\n") + (before.hasSuffix("\n\n") ? "" : "\n") + text
+        }
+        if !output.isEmpty, !output.hasSuffix("\n") { output += "\n" }
+        try library.write(output, to: url)
+        library.reload()
+        remember(before == nil ? "made the note 「\(library.path(of: url))」" : "changed the note 「\(library.path(of: url))」") { [library] in
+            if let before { try library.write(before, to: url) } else { try library.trash(url) }
+        }
+        return noteRow(url)
+    }
+
+    private func noteSearch(_ body: [String: Any]) throws -> [String: Any] {
+        let text = (body["text"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { throw Failure(message: "A \"text\" to look for is needed.") }
+        let named = library.named(text).prefix(20).map { library.path(of: $0) }
+        let hits = library.search(text, limit: 100).map { ["note": library.path(of: $0.url), "line": $0.line + 1, "text": $0.snippet] as [String: Any] }
+        return ["named": Array(named), "lines": hits]
+    }
+
+    private func noteMove(_ body: [String: Any]) throws -> [String: Any] {
+        let url = try noteURL(body)
+        guard let to = (body["to"] as? String)?.trimmingCharacters(in: .whitespaces), !to.isEmpty, let root = library.root else {
+            throw Failure(message: "A \"to\" (new name, or folder/name) is needed.")
+        }
+        let target = to.hasSuffix(".md") ? String(to.dropLast(3)) : to
+        let folder = (target as NSString).deletingLastPathComponent
+        var moved = url
+        if !folder.isEmpty || to.hasSuffix("/") {
+            let destination = root.appendingPathComponent(folder.isEmpty ? target : folder, isDirectory: true)
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            moved = try library.move(url, into: destination)
+        }
+        let name = (target as NSString).lastPathComponent
+        if !to.hasSuffix("/"), !name.isEmpty, name != NotesLibrary.title(of: moved) { moved = try library.rename(moved, to: name) }
+        return noteRow(moved)
+    }
+
+    private func noteRemove(_ body: [String: Any]) throws -> [String: Any] {
+        let url = try noteURL(body)
+        let row = noteRow(url)
+        try library.trash(url)
+        return ["trashed": row]
+    }
+
     private func listPages(_ body: [String: Any]) throws -> [String: Any] {
         let from = try body["from"].map(planDay)?.key ?? "0000-00-00"
         let to = try body["to"].map(planDay)?.key ?? "9999-99-99"

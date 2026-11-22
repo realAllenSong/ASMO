@@ -198,6 +198,13 @@ struct PlannerView: View {
     @AppStorage("macHome") private var macHome = "paper"
     /// The day the paper opens on (today, or a day double-clicked in the calendar).
     @State private var paperFocus: PlanDate?
+    #if os(macOS)
+    /// The note open on the page instead of the days (nil: the days).
+    @State private var openNote: URL?
+    @State private var findingNote = false
+    @StateObject private var noteOutline = NoteOutline()
+    @ObservedObject private var noteLibrary = NotesLibrary.shared
+    #endif
     @State private var assistantWorking = false
     @State private var assistantCommands: AgentCommands?
     /// Something said or typed in the bar is being organized by the model.
@@ -852,6 +859,30 @@ struct PlannerView: View {
     }
     #else
     #if DEBUG
+    private func debugNote(_ command: String) {
+        let out = AppPaths.caches.appendingPathComponent("asmo-ed.txt")
+        if command.hasPrefix("open:"), let root = noteLibrary.root {
+            openNote = root.appendingPathComponent(String(command.dropFirst(5)))
+        } else if command == "days" {
+            openNote = nil
+        } else if command == "find" {
+            findingNote = true
+        } else if command == "rewrite" {
+            // Each note goes through the editor's text (styled, as when shown) and back out, unchanged or not.
+            var report: [String] = []
+            for url in noteLibrary.notes {
+                guard let original = noteLibrary.read(url) else { continue }
+                let view = NoteTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+                let crlf = original.contains("\r\n")
+                view.string = crlf ? original.replacingOccurrences(of: "\r\n", with: "\n") : original
+                let back = crlf ? view.string.replacingOccurrences(of: "\n", with: "\r\n") : view.string
+                if back != original { report.append("CHANGED " + noteLibrary.path(of: url)) }
+            }
+            report.append("checked \(noteLibrary.notes.count)")
+            try? report.joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// Test driver for the page being written (Debug only): see "ed:" in the nav hooks.
     private func debugEdit(_ command: String) {
         let out = AppPaths.caches.appendingPathComponent("asmo-ed.txt")
@@ -1255,6 +1286,9 @@ struct PlannerView: View {
     }
 
     private func jump(to day: PlanDate) {
+        #if os(macOS)
+        openNote = nil
+        #endif
         let today = clock.today
         paperFocus = day == today ? nil : day.dayOnly
         if day == today {
@@ -1280,6 +1314,13 @@ struct PlannerView: View {
                     homeLeading
                     Spacer()
                     Button {
+                        if let note = openNote {
+                            // A note is Markdown already: copied as it is.
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(noteLibrary.read(note) ?? "", forType: .string)
+                            announce(String(localized: "这篇笔记已复制为 Markdown"))
+                            return
+                        }
                         guard let storage = pageController.textView?.textStorage else { return }
                         // The days' headings are hidden in the journal layout (the date is in the margin): drawn
                         // at heading size again here, so each day is a heading in the Markdown.
@@ -1319,6 +1360,11 @@ struct PlannerView: View {
                     paperSidebar
                     Rectangle().fill(theme.line.opacity(0.6)).frame(width: 1)
                 }
+                if let openNote {
+                    NoteScreen(url: openNote, theme: theme, library: noteLibrary, outline: noteOutline, controller: pageController,
+                               open: { self.openNote = $0 })
+                        .background(theme.sheet)
+                } else {
                 DayDocumentView(days: days, anchor: paperFocus ?? clock.today, jump: paperJump, theme: theme,
                                 actions: documentActions, controller: pageController, organizeRequest: organizeTick,
                                 rebuildRequest: pageRebuild, autofocus: true, minHeight: 600, organizeWhenIdle: true,
@@ -1329,15 +1375,41 @@ struct PlannerView: View {
                     // The light look: the page is white, edge to edge (the sidebar already is the contents; a
                     // margin either side would only take room from the writing).
                     .background(theme.sheet)
+                }
             }
+        }
+        .overlay(alignment: .top) {
+            if findingNote {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.08).ignoresSafeArea().onTapGesture { findingNote = false }
+                    NoteFinder(library: noteLibrary, theme: theme, open: { url in findingNote = false; openNote = url },
+                               close: { findingNote = false })
+                        .padding(.top, 90)
+                }
+            }
+        }
+        .background {
+            // ⌘P finds a note; ⌘N starts one.
+            Button("") { findingNote.toggle() }.keyboardShortcut("p", modifiers: .command).opacity(0)
+            Button("") {
+                if let url = try? noteLibrary.create(in: openNote?.deletingLastPathComponent()) { openNote = url }
+            }.keyboardShortcut("n", modifiers: .command).opacity(0)
         }
     }
 
     private var paperSidebar: some View {
-        PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
-                             today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
-                             pick: { jump(toMonth: $0) }, close: { paperContents = false })
-            .background(theme.sidebar)
+        VStack(spacing: 0) {
+            PaperContentsSidebar(model: paperContentsModel, theme: theme, thisYear: clock.today.year,
+                                 today: PlanDate(year: clock.today.year, month: clock.today.month), reduceMotion: reduceMotion,
+                                 showingDays: openNote == nil, showDays: { openNote = nil },
+                                 pick: { openNote = nil; jump(toMonth: $0) }, close: { paperContents = false })
+                .frame(maxHeight: .infinity)
+            Rectangle().fill(theme.line.opacity(0.6)).frame(height: 1)
+            NotesSidebar(library: noteLibrary, theme: theme, current: openNote, open: { openNote = $0 }, find: { findingNote = true })
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: 200)
+        .background(theme.sidebar)
     }
 
     /// A month from the contents: its first written day at the top of the window.
@@ -2818,6 +2890,9 @@ struct PlannerView: View {
                 // "ed:…": drive the page being written like a person would (select, type, keys, toolbar), and "ed:dump".
                 #if DEBUG && os(macOS)
                 if text.hasPrefix("ed:") { debugEdit(String(text.dropFirst(3))); return }
+                // "note:open:PATH" opens a note; "note:days" goes back; "note:find" opens ⌘P; "note:rewrite" opens
+                // every note and writes it back from the editor (the round trip must leave every file as it was).
+                if text.hasPrefix("note:") { debugNote(String(text.dropFirst(5))); return }
                 #endif
                 if let step = Int(text.trimmed), let current = editingDay ?? Optional(selected),
                    let date = current.date(in: clock.calendar), let next = clock.calendar.date(byAdding: .day, value: step, to: date) {
@@ -5241,6 +5316,9 @@ struct PaperContentsSidebar: View {
         return (1...12).contains(month.month) ? formatter.monthSymbols[month.month - 1] : "\(month.month)"
     }
     let reduceMotion: Bool
+    /// The days are on the page (not a note).
+    let showingDays: Bool
+    let showDays: () -> Void
     let pick: (PlanDate) -> Void
     let close: () -> Void
 
@@ -5259,7 +5337,11 @@ struct PaperContentsSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("目录").font(.system(size: 12, weight: .semibold)).foregroundStyle(theme.quiet)
+                Button(action: showDays) {
+                    Text("日程").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(showingDays ? theme.accent : theme.quiet)
+                }
+                .buttonStyle(.plain).help("回到日程")
                 Spacer()
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(theme.quiet)
@@ -5326,7 +5408,6 @@ struct PaperContentsSidebar: View {
                 .onAppear { reader.scrollTo(model.visible ?? today, anchor: .center) }
             }
         }
-        .frame(width: 150)
     }
 }
 #endif

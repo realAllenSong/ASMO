@@ -40,6 +40,16 @@ The day's page (free notes under the items), written in Markdown
   Markdown: headings, **bold**, *italic*, ~~strike~~, `code`, [links](https://…), lists, - [ ] checkboxes,
   > quotes, tables, ``` code blocks, ```mermaid diagrams (drawn as pictures), and ![pictures](path or URL).
 
+Notes (Markdown files in the notes folder; an Obsidian vault works as it is: [[links]], ![[pictures]])
+  asmo notes [FOLDER]                the notes, by path inside the folder
+  asmo note PATH                     a note's Markdown (PATH: "个人/账号", or just the note's name)
+  asmo note write PATH [--file F] [--append|--new]
+                                     Markdown from stdin (or --file) becomes the whole note; --append adds it at the
+                                     end; --new makes a new note (fails if one is there)
+  asmo note search TEXT              notes whose name contains TEXT, and the lines of notes that do
+  asmo note mv PATH TO               rename ("新名字"), or move ("folder/" or "folder/新名字"); [[links]] follow
+  asmo note rm PATH                  to the Trash
+
 Routines
   asmo routines                      repeating items
   asmo routine add TITLE [--on daily|weekdays|weekends|mon,thu|monthly|monthly:15] [--time HH:MM] [--end HH:MM] [--from DAY]
@@ -278,6 +288,21 @@ let tools: [Tool] = [
                       "zone": described("string", "Time zone name, e.g. Asia/Shanghai, or \"device\"")],
          required: ["id"], request: passing("date-set")),
     Tool(name: "remove_important_date", about: "Remove an important date.", properties: ["id": stringType], required: ["id"], request: passing("date-remove")),
+    Tool(name: "list_notes", about: "The user's notes (Markdown files), by path inside the notes folder.",
+         properties: ["folder": described("string", "Only the notes in this folder")], request: passing("notes")),
+    Tool(name: "read_note", about: "A note's Markdown. Notes use Obsidian syntax: [[links]] and ![[pictures]].",
+         properties: ["note": described("string", "Path inside the notes folder (\"个人/账号\") or the note's name")],
+         required: ["note"], request: passing("note-read")),
+    Tool(name: "write_note", about: "Write a note in Markdown: the whole note (replace), added at its end (append), or a new note (create).",
+         properties: ["note": described("string", "Path inside the notes folder, e.g. \"个人/想法\""), "markdown": stringType,
+                      "mode": ["type": "string", "enum": ["replace", "append", "create"]]],
+         required: ["note", "markdown"], request: passing("note-write")),
+    Tool(name: "search_notes", about: "Notes whose name contains the text, and lines of notes that contain it.",
+         properties: ["text": stringType], required: ["text"], request: passing("note-search")),
+    Tool(name: "move_note", about: "Rename or move a note; links to it follow.",
+         properties: ["note": stringType, "to": described("string", "A new name, \"folder/\" or \"folder/name\"")],
+         required: ["note", "to"], request: passing("note-move")),
+    Tool(name: "remove_note", about: "Move a note to the Trash.", properties: ["note": stringType], required: ["note"], request: passing("note-remove")),
     Tool(name: "undo", about: "Take back the last change made through these tools (call again for earlier ones).", properties: [:], request: passing("undo")),
 ]
 
@@ -380,7 +405,7 @@ func setUp(skill: String?) -> Never {
 var arguments = Array(CommandLine.arguments.dropFirst())
 var flags: [String: String] = [:]
 var words: [String] = []
-let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--append", "--lunar"]
+let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--append", "--lunar", "--new"]
 var index = 0
 while index < arguments.count {
     let argument = arguments[index]
@@ -484,6 +509,28 @@ do {
             request = ["cmd": "page-remove", "day": rest[1], "blocks": Array(rest.dropFirst(2))]
         default:
             request = ["cmd": "page", "day": rest.first ?? "today"]
+        }
+    case "notes":
+        request = ["cmd": "notes"]
+        if let folder = rest.first { request["folder"] = folder }
+    case "note":
+        switch rest.first {
+        case "write":
+            guard rest.count > 1 else { fail("asmo note write PATH [--file F] [--append|--new]   (Markdown on stdin)") }
+            request = ["cmd": "note-write", "note": rest.dropFirst().joined(separator: " "), "markdown": markdownInput(),
+                       "mode": flags["--append"] != nil ? "append" : flags["--new"] != nil ? "create" : "replace"]
+        case "search":
+            guard rest.count > 1 else { fail("asmo note search TEXT") }
+            request = ["cmd": "note-search", "text": rest.dropFirst().joined(separator: " ")]
+        case "mv":
+            guard rest.count == 3 else { fail("asmo note mv PATH TO   (TO: a new name, \"folder/\" or \"folder/name\")") }
+            request = ["cmd": "note-move", "note": rest[1], "to": rest[2]]
+        case "rm":
+            guard rest.count > 1 else { fail("asmo note rm PATH") }
+            request = ["cmd": "note-remove", "note": rest.dropFirst().joined(separator: " ")]
+        default:
+            guard !rest.isEmpty else { fail("asmo note PATH   (see: asmo help)") }
+            request = ["cmd": "note-read", "note": rest.joined(separator: " ")]
         }
     case "pages":
         request = ["cmd": "pages"]

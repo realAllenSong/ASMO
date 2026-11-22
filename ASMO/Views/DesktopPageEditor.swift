@@ -34,6 +34,7 @@ final class PageController: ObservableObject {
     }
 
     func highlight() {
+        if let note { note.wrap("=="); return }
         apply { storage, range in
             let has = storage.attribute(.backgroundColor, at: range.location, effectiveRange: nil) != nil
             if has { storage.removeAttribute(.backgroundColor, range: range) }
@@ -54,13 +55,20 @@ final class PageController: ObservableObject {
 
     // MARK: Formatting
 
-    func toggleBold() { toggleTrait(.boldFontMask) }
-    func toggleItalic() { toggleTrait(.italicFontMask) }
+    /// A note is Markdown: the toolbar writes its marks instead of formatting.
+    private var note: NoteTextView? { textView as? NoteTextView }
 
-    func toggleUnderline() { toggle(.underlineStyle, on: NSUnderlineStyle.single.rawValue) }
-    func toggleStrike() { toggle(.strikethroughStyle, on: NSUnderlineStyle.single.rawValue) }
+    func toggleBold() { if let note { note.wrap("**") } else { toggleTrait(.boldFontMask) } }
+    func toggleItalic() { if let note { note.wrap("*") } else { toggleTrait(.italicFontMask) } }
+
+    func toggleUnderline() {
+        if note != nil { NSSound.beep(); return }
+        toggle(.underlineStyle, on: NSUnderlineStyle.single.rawValue)
+    }
+    func toggleStrike() { if let note { note.wrap("~~") } else { toggle(.strikethroughStyle, on: NSUnderlineStyle.single.rawValue) } }
 
     func color(_ color: NSColor?) {
+        if note != nil { NSSound.beep(); return }
         apply { storage, range in
             if let color { storage.addAttribute(.foregroundColor, value: color, range: range) }
             else { storage.removeAttribute(.foregroundColor, range: range) }
@@ -68,6 +76,7 @@ final class PageController: ObservableObject {
     }
 
     func toggleHeading() {
+        if let note { note.linePrefix("## "); return }
         guard let textView, let storage = textView.textStorage else { return }
         let range = (storage.string as NSString).paragraphRange(for: textView.selectedRange())
         let current = (storage.attribute(.font, at: min(range.location, max(0, storage.length - 1)), effectiveRange: nil) as? NSFont)
@@ -79,6 +88,7 @@ final class PageController: ObservableObject {
 
     /// Prefixes the current line(s) with a bullet or checkbox, or removes it.
     func toggleLinePrefix(_ marker: String) {
+        if let note { note.linePrefix(marker == "☐ " ? "- [ ] " : "- "); return }
         guard let textView, let storage = textView.textStorage else { return }
         let text = storage.string as NSString
         let range = text.paragraphRange(for: textView.selectedRange())
@@ -111,6 +121,7 @@ final class PageController: ObservableObject {
     /// 重复: a menu by the line (每天 / 工作日 / 每周X / 每月N日, named for the line's day) that makes it repeat
     /// right away. Outside the document (no days), the old way: " #每天" at the end of the line.
     func makeRepeating() {
+        if note != nil { NSSound.beep(); return }
         if let view = textView as? DocTextView, let coordinator = view.coordinator {
             guard let choices = coordinator.repeatChoices() else { NSSound.beep(); return }
             let menu = NSMenu()
@@ -150,6 +161,7 @@ final class PageController: ObservableObject {
     /// Links the selected words: a small box by the selection asks for the address (filled in from the clipboard
     /// when a link was just copied; Return confirms). Selected text that is itself an address is linked at once.
     func link() {
+        if let note { note.insertLink(); return }
         guard let textView, let storage = textView.textStorage else { return }
         let range = textView.selectedRange()
         let selected = (storage.string as NSString).substring(with: range).trimmed
@@ -205,6 +217,7 @@ final class PageController: ObservableObject {
     }
 
     func insertImage() {
+        if let note { note.choosePicture(); return }
         guard let textView else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
