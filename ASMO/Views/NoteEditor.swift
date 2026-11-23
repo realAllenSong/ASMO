@@ -1045,6 +1045,12 @@ final class NoteTextView: NSTextView {
         engaged = true
         super.keyDown(with: event)
     }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
+        let old = selectionArea()
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if let old { setNeedsDisplay(old) }
+    }
     private var pictures: [String: NSImage] = [:]
 
     /// The width of the column of text (set from the window; pictures are sized to it).

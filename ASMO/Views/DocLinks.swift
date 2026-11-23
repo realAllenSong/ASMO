@@ -9,6 +9,25 @@ import SwiftUI
 /// - "[[note]]" in a line is a link: a click opens the note in a small window by the line, to read and write in,
 ///   with a button to open it full size among the notes.
 
+extension NSTextView {
+    /// The area the selection's highlight covers now (nil when nothing is selected), with a margin: drawn again
+    /// when the selection changes, so no edge of the old highlight stays on screen.
+    func selectionArea() -> NSRect? {
+        guard let layout = layoutManager, let container = textContainer else { return nil }
+        var area: NSRect?
+        for value in selectedRanges {
+            let range = value.rangeValue
+            guard range.length > 0 else { continue }
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+                .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y).insetBy(dx: -6, dy: -6)
+            area = area.map { $0.union(rect) } ?? rect
+        }
+        // Whole lines, edge to edge (a highlight can run to the end of the line).
+        return area.map { NSRect(x: bounds.minX, y: $0.minY, width: bounds.width, height: $0.height) }
+    }
+}
+
 /// One choice in the "#" menu.
 struct HashChoice: Identifiable {
     enum Action {

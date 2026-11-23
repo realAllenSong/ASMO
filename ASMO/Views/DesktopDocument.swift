@@ -421,9 +421,11 @@ final class DocTextView: NSTextView {
     /// A selection going away is drawn away everywhere it was: formatting it (striking a line through, which
     /// redraws the line as done) can leave its old highlight on screen otherwise.
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
-        let had = selectedRanges.contains { $0.rangeValue.length > 0 }
+        let old = selectionArea()
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
-        if had, !stillSelecting { setNeedsDisplay(visibleRect) }
+        // Where the selection was is drawn again, a little wider than its highlight (a click elsewhere clears the
+        // selection on mouse down, and the highlight's top edge was left on screen).
+        if let old { setNeedsDisplay(old) }
     }
 
     weak var coordinator: DocCoordinator?
