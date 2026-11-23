@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="https://realallensong.github.io/ASMO/">网站</a> · <a href="https://github.com/realAllenSong/ASMO/releases/latest">下载</a>
+  <a href="README.md">English</a> · <a href="https://asmo.entropinia.com/">网站</a> · <a href="https://github.com/realAllenSong/ASMO/releases/latest">下载</a>
 </p>
 
 <p align="center">

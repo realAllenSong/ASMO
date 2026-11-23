@@ -1,3 +1,3 @@
 User-agent: *
 Allow: /
-Sitemap: https://realallensong.github.io/ASMO/sitemap.xml
+Sitemap: https://asmo.entropinia.com/sitemap.xml
