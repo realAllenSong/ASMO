@@ -191,7 +191,7 @@ The app is Swift, SwiftUI and SwiftData, with an AppKit text view for the day pa
 
 ## License
 
-[GNU AGPL v3](LICENSE), with the attribution terms in [NOTICE](NOTICE). You can use, study, change and share ASMO. If you distribute it or a work based on it, or let people use it over a network, publish your source under the same licence and keep the credit "Based on ASMO by realAllenSong".
+[GNU AGPL v3](LICENSE), with the attribution terms in [NOTICE](NOTICE). You can use, study, change and share ASMO. If you distribute it or a work based on it, or let people use it over a network, publish your source under the same licence and keep the credit "Based on ASMO by Zhiyuan Song".
 
 **Commercial licence:** to use ASMO in a closed-source product or service, or on terms other than the AGPL, [contact us](mailto:song@entropinia.com).
 

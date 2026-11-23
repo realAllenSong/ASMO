@@ -191,7 +191,7 @@ app 用 Swift、SwiftUI 和 SwiftData 写成，每天的页面是一个 AppKit �
 
 ## 许可
 
-[GNU AGPL v3](LICENSE)，署名要求见 [NOTICE](NOTICE)。你可以自由使用、研究、修改和分享逐日。如果分发它或基于它的作品，或通过网络把它提供给别人使用，需要以同样的许可证公开源代码，并保留“Based on ASMO by realAllenSong”的署名。
+[GNU AGPL v3](LICENSE)，署名要求见 [NOTICE](NOTICE)。你可以自由使用、研究、修改和分享逐日。如果分发它或基于它的作品，或通过网络把它提供给别人使用，需要以同样的许可证公开源代码，并保留“Based on ASMO by Zhiyuan Song”的署名。
 
 **商业授权：**如果想在闭源产品或服务中使用逐日，或需要 AGPL 以外的条款，请[联系我们](mailto:song@entropinia.com)。
 

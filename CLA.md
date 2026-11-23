@@ -6,8 +6,8 @@ your first pull request:
 
 > I have read the CLA Document and I hereby sign the CLA
 
-"You" are the person submitting a contribution. "The maintainer" is realAllenSong, the owner of the ASMO repository
-(https://github.com/realAllenSong/ASMO). A "contribution" is any code, documentation, artwork or other material you
+"You" are the person submitting a contribution. "The maintainer" is Zhiyuan Song (GitHub: realAllenSong), the author and owner of
+ASMO (https://github.com/realAllenSong/ASMO). A "contribution" is any code, documentation, artwork or other material you
 submit to the project, by pull request or otherwise.
 
 ## 1. Copyright
