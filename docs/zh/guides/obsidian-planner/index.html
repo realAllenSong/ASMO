@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Obsidian 用户的日程方案：逐日 ASMO</title>
+<meta name="description" content="笔记在 Obsidian，日程在别处？逐日直接打开你的 Obsidian 库做笔记，待办同步到 Apple 日历和提醒事项，免费开源。" />
+<link rel="canonical" href="https://asmo.entropinia.com/zh/guides/obsidian-planner/" />
+<meta name="robots" content="index, follow, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://asmo.entropinia.com/zh/guides/obsidian-planner/" />
+<meta property="og:title" content="Obsidian 用户的日程方案：逐日 ASMO" />
+<meta property="og:description" content="笔记在 Obsidian，日程在别处？逐日直接打开你的 Obsidian 库做笔记，待办同步到 Apple 日历和提醒事项，免费开源。" />
+<meta property="og:image" content="https://asmo.entropinia.com/assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/assets/icon.png" />
+<link rel="stylesheet" href="/assets/guide.css" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "Article", "headline": "Obsidian 用户的日程方案", "description": "笔记在 Obsidian，日程在别处？逐日直接打开你的 Obsidian 库做笔记，待办同步到 Apple 日历和提醒事项，免费开源。", "inLanguage": "zh-CN", "datePublished": "2026-11-22", "dateModified": "2026-11-22", "author": {"@type": "Person", "name": "realAllenSong", "url": "https://github.com/realAllenSong"}, "mainEntityOfPage": "https://asmo.entropinia.com/zh/guides/obsidian-planner/", "about": {"@type": "SoftwareApplication", "name": "ASMO", "operatingSystem": "macOS", "url": "https://asmo.entropinia.com/", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, "publisher": {"@type": "Organization", "name": "ASMO", "url": "https://asmo.entropinia.com/"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "逐日能打开我的 Obsidian 库吗？", "acceptedAnswer": {"@type": "Answer", "text": "能。笔记就是 Markdown 文件夹，把逐日指向你的库，两个应用用的是同一批文件。"}}, {"@type": "Question", "name": "要放弃 Obsidian 吗？", "acceptedAnswer": {"@type": "Answer", "text": "不用。很多人继续用 Obsidian 写东西，用逐日管同一个库里的日程和待办。"}}, {"@type": "Question", "name": "怎么同步到 iPhone？", "acceptedAnswer": {"@type": "Answer", "text": "日程通过你自己 iCloud 上的 Apple 日历和提醒事项同步；放在 Git 仓库里的笔记通过 Git 同步。"}}]}, {"@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "ASMO", "item": "https://asmo.entropinia.com/"}, {"@type": "ListItem", "position": 2, "name": "指南", "item": "https://asmo.entropinia.com/zh/guides/"}, {"@type": "ListItem", "position": 3, "name": "Obsidian 用户的日程方案", "item": "https://asmo.entropinia.com/zh/guides/obsidian-planner/"}]}]}</script>
+</head>
+<body>
+<header class="top"><a class="brand" href="/"><img src="/assets/icon.png" alt="" width="22" height="22" />ASMO</a><nav><a href="/zh/guides/">指南</a><a href="https://github.com/realAllenSong/ASMO/releases/latest" rel="noopener">下载</a></nav></header>
+<main>
+<div class="kicker">给 Obsidian 用户</div>
+<h1>Obsidian 用户的日程方案</h1>
+<div class="meta">更新于 <time datetime="2026-11-22">2026-11-22</time></div>
+<div class="answer"><p>如果你的笔记在 Obsidian，日程却记在别的地方，<strong>逐日</strong>能把两者放进一个 Mac 应用。它的笔记就是一个 Markdown 文件夹，所以 <strong>Obsidian 的库直接能用</strong>：表格、提示框、公式、流程图、Excalidraw 手绘都在原处显示。每天的安排就放在旁边，待办自动进 Apple 日历和提醒事项，再到你的 iPhone 上。免费，开源。</p></div>
+<h2>从 Obsidian 带过来的</h2>
+<ul>
+<li><strong>还是那些文件。</strong>笔记就是文件夹里的 Markdown，打开你的库，Obsidian 照样用同一批文件。</li>
+<li><strong>块都能显示。</strong>表格、提示框、行内和块公式、mermaid 流程图，都在原处画出来。</li>
+<li><strong>Excalidraw。</strong>手绘的保存方式和 Obsidian 的 Excalidraw 插件一样，同一个文件两边都能打开。</li>
+<li><strong>Git 同步。</strong>如果库是一个 Git 仓库，逐日会自动提交、拉取、推送，手机上的 Obsidian 也能看到。</li>
+</ul>
+<h2>逐日多出来的</h2>
+<div class="tbl"><table><thead><tr><th></th><th class=me>逐日</th><th>Obsidian 加日历插件</th></tr></thead><tbody><tr><td>安排每一天</td><td class=me>每天一页，随手写；待办自动变成日程和提醒</td><td>看你装了哪些插件、怎么配置</td></tr><tr><td>手机</td><td class=me>通过 Apple 日历和提醒事项双向同步</td><td>通过 Obsidian Sync 或自己的同步方式</td></tr><tr><td>agent</td><td class=me>自带命令行、MCP 和技能</td><td>没有内置</td></tr><tr><td>重要日子</td><td class=me>生日、纪念日支持公历和农历</td><td>看插件</td></tr><tr><td>价格</td><td class=me>免费开源</td><td>Obsidian 免费，Sync 另外收费</td></tr></tbody></table></div>
+<h2>怎么开始</h2>
+<ol><li>下载逐日并打开。</li><li>把逐日的笔记文件夹选成你的 Obsidian 库。</li><li>在当天的页面写下计划，待办会出现在日历和提醒事项里。</li></ol>
+<section class="faq"><h2>常见问题</h2><details><summary>逐日能打开我的 Obsidian 库吗？</summary><p>能。笔记就是 Markdown 文件夹，把逐日指向你的库，两个应用用的是同一批文件。</p></details><details><summary>要放弃 Obsidian 吗？</summary><p>不用。很多人继续用 Obsidian 写东西，用逐日管同一个库里的日程和待办。</p></details><details><summary>怎么同步到 iPhone？</summary><p>日程通过你自己 iCloud 上的 Apple 日历和提醒事项同步；放在 Git 仓库里的笔记通过 Git 同步。</p></details></section>
+<div class="cta"><strong>免费试试逐日</strong><p>需要 Apple 芯片的 Mac 和 macOS 15 或更高版本。不用注册，没有服务器，不用订阅。</p><a class="btn" href="https://github.com/realAllenSong/ASMO/releases/latest" rel="noopener">下载 macOS 版</a></div>
+<p class="more">相关指南: <a href="/zh/guides/claude-code-calendar/">能让 Claude Code 帮你排日程的日历</a></p>
+<section class="src"><h2>资料来源</h2><ol><li><a href="https://github.com/realAllenSong/ASMO" rel="noopener">ASMO README</a></li><li><a href="https://asmo.entropinia.com/" rel="noopener">ASMO website</a></li><li><a href="https://obsidian.md/pricing" rel="noopener">Obsidian 价格</a></li></ol></section>
+</main>
+<footer><a href="/">ASMO</a> · <a href="https://github.com/realAllenSong/ASMO" rel="noopener">GitHub</a></footer>
+</body>
+</html>

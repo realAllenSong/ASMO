@@ -21,3 +21,10 @@
 
 - Source: https://github.com/realAllenSong/ASMO
 - Download: https://github.com/realAllenSong/ASMO/releases/latest
+
+## Guides
+
+- [A calendar Claude Code and Codex can use](https://asmo.entropinia.com/guides/calendar-for-claude-code/): how Claude Code, Codex and Claude Desktop read and change your days, compared with Google Calendar over MCP.
+- [Days and notes in one app, for Obsidian users](https://asmo.entropinia.com/guides/obsidian-planner/): ASMO opens an Obsidian vault as its notes.
+- [能让 Claude Code 帮你排日程的日历](https://asmo.entropinia.com/zh/guides/claude-code-calendar/) (Chinese)
+- [Obsidian 用户的日程方案](https://asmo.entropinia.com/zh/guides/obsidian-planner/) (Chinese)

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>A calendar Claude Code and Codex can use | ASMO</title>
+<meta name="description" content="Want Claude Code or Codex to plan your day? ASMO is a free Mac calendar and to-do list with a command line and an MCP server, so agents can read and change your days, with undo." />
+<link rel="canonical" href="https://asmo.entropinia.com/guides/calendar-for-claude-code/" />
+<meta name="robots" content="index, follow, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://asmo.entropinia.com/guides/calendar-for-claude-code/" />
+<meta property="og:title" content="A calendar Claude Code and Codex can use | ASMO" />
+<meta property="og:description" content="Want Claude Code or Codex to plan your day? ASMO is a free Mac calendar and to-do list with a command line and an MCP server, so agents can read and change your days, with undo." />
+<meta property="og:image" content="https://asmo.entropinia.com/assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="/assets/icon.png" />
+<link rel="stylesheet" href="/assets/guide.css" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@graph": [{"@type": "Article", "headline": "A calendar Claude Code and Codex can use", "description": "Want Claude Code or Codex to plan your day? ASMO is a free Mac calendar and to-do list with a command line and an MCP server, so agents can read and change your days, with undo.", "inLanguage": "en", "datePublished": "2026-11-22", "dateModified": "2026-11-22", "author": {"@type": "Person", "name": "realAllenSong", "url": "https://github.com/realAllenSong"}, "mainEntityOfPage": "https://asmo.entropinia.com/guides/calendar-for-claude-code/", "about": {"@type": "SoftwareApplication", "name": "ASMO", "operatingSystem": "macOS", "url": "https://asmo.entropinia.com/", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, "publisher": {"@type": "Organization", "name": "ASMO", "url": "https://asmo.entropinia.com/"}}, {"@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can Claude Code manage my calendar?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. With ASMO installed, Claude Code uses the asmo command and its skill to read and change your days; the Claude desktop app uses ASMO's MCP server."}}, {"@type": "Question", "name": "Does it work with Codex?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ASMO installs the same skill for Codex, and any agent that can run a shell command can use the asmo command."}}, {"@type": "Question", "name": "Does ASMO run an AI model?", "acceptedAnswer": {"@type": "Answer", "text": "No. The app runs no model of its own; the agent you already use does the thinking, and ASMO stores exactly what it is told."}}, {"@type": "Question", "name": "Is my data uploaded anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "No. Your data is a local file on your Mac. Only your own iCloud Calendar and Reminders sync to your other devices."}}]}, {"@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "ASMO", "item": "https://asmo.entropinia.com/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://asmo.entropinia.com/guides/"}, {"@type": "ListItem", "position": 3, "name": "A calendar Claude Code and Codex can use", "item": "https://asmo.entropinia.com/guides/calendar-for-claude-code/"}]}]}</script>
+</head>
+<body>
+<header class="top"><a class="brand" href="/"><img src="/assets/icon.png" alt="" width="22" height="22" />ASMO</a><nav><a href="/guides/">Guides</a><a href="https://github.com/realAllenSong/ASMO/releases/latest" rel="noopener">Download</a></nav></header>
+<main>
+<div class="kicker">Calendar for coding agents</div>
+<h1>A calendar Claude Code and Codex can use</h1>
+<div class="meta">Updated <time datetime="2026-11-22">2026-11-22</time></div>
+<div class="answer"><p><strong>ASMO</strong> is a free, open-source calendar and to-do list for the Mac that coding agents can use directly. It installs an <code>asmo</code> command and a skill for Claude Code and Codex, plus an MCP server for the Claude desktop app, so an agent can read your days, add and move items, check things off and write a day's notes. Every change can be undone, and your data stays on your Mac and in your own iCloud.</p></div>
+<div class="tbl"><table><thead><tr><th></th><th class=me>ASMO</th><th>Google Calendar via MCP</th><th>Apple Calendar alone</th></tr></thead><tbody><tr><td>Setup for Claude Code</td><td class=me>Automatic on first launch: command, skill and MCP entry</td><td>Official remote server, or a community server with a Google Cloud project</td><td>No command line or MCP server of its own</td></tr><tr><td>Account</td><td class=me>None</td><td>Google account; the official server in Claude.ai or Desktop needs a paid Claude plan</td><td>Apple ID</td></tr><tr><td>Where data lives</td><td class=me>A local file on your Mac, plus your own iCloud Calendar and Reminders</td><td>Google's servers</td><td>iCloud</td></tr><tr><td>Undo an agent's change</td><td class=me>Yes, <code>asmo undo</code></td><td>Depends on the server</td><td>No</td></tr><tr><td>Notes for each day</td><td class=me>A Markdown page per day, with tables and diagrams</td><td>Event descriptions</td><td>Event notes</td></tr><tr><td>Price</td><td class=me>Free, open source (AGPL-3.0)</td><td>Free with a Google account</td><td>Free (built in)</td></tr></tbody></table></div>
+<h2>What an agent can do with it</h2>
+<ul>
+<li><strong>Plan from a conversation.</strong> Tell Claude Code "I'm running from 9 to 10 tonight and have a call with Li at 3 tomorrow", and both land in the calendar as you talk.</li>
+<li><strong>Write the day's page.</strong> Agents write Markdown: headings, checklists, tables, pictures and mermaid diagrams, drawn in the app.</li>
+<li><strong>Work with structured data.</strong> Dates and times arrive as fields, so nothing is guessed from free text. Answers come back as JSON.</li>
+<li><strong>Stay reversible.</strong> <code>asmo undo</code> takes back the last change an agent made, and the one before it.</li>
+</ul>
+<h2>How it reaches your phone</h2>
+<p>Items with a time become events in Apple Calendar and the rest become reminders, in a calendar and a list named 逐日. Check something off on your iPhone and it is done on your Mac. ASMO has no server of its own; syncing goes through your iCloud.</p>
+<h2>Getting started</h2>
+<ol><li>Download ASMO and open it once. It puts <code>asmo</code> in <code>~/.local/bin</code>, gives Claude Code and Codex the skill, and registers its MCP server with the Claude desktop app.</li>
+<li>Ask your agent: "What's on my calendar this week?" or "Plan tomorrow from this list."</li>
+<li>Or use the command yourself: <code>asmo add "Run" --day today --time 21:00 --end 22:00</code>.</li></ol>
+<section class="faq"><h2>FAQ</h2><details><summary>Can Claude Code manage my calendar?</summary><p>Yes. With ASMO installed, Claude Code uses the asmo command and its skill to read and change your days; the Claude desktop app uses ASMO&#x27;s MCP server.</p></details><details><summary>Does it work with Codex?</summary><p>Yes. ASMO installs the same skill for Codex, and any agent that can run a shell command can use the asmo command.</p></details><details><summary>Does ASMO run an AI model?</summary><p>No. The app runs no model of its own; the agent you already use does the thinking, and ASMO stores exactly what it is told.</p></details><details><summary>Is my data uploaded anywhere?</summary><p>No. Your data is a local file on your Mac. Only your own iCloud Calendar and Reminders sync to your other devices.</p></details></section>
+<div class="cta"><strong>Try ASMO for free</strong><p>Apple Silicon Mac, macOS 15 or later. No account, no server, no subscription.</p><a class="btn" href="https://github.com/realAllenSong/ASMO/releases/latest" rel="noopener">Download for macOS</a></div>
+<p class="more">More guides: <a href="/guides/obsidian-planner/">Days and notes in one app, for Obsidian users</a></p>
+<section class="src"><h2>Sources</h2><ol><li><a href="https://github.com/realAllenSong/ASMO" rel="noopener">ASMO README</a></li><li><a href="https://asmo.entropinia.com/" rel="noopener">ASMO website</a></li><li><a href="https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server" rel="noopener">Google: configure the Calendar MCP server</a></li><li><a href="https://github.com/nspady/google-calendar-mcp" rel="noopener">Google Calendar MCP (community server)</a></li></ol></section>
+</main>
+<footer><a href="/">ASMO</a> · <a href="https://github.com/realAllenSong/ASMO" rel="noopener">GitHub</a></footer>
+</body>
+</html>
