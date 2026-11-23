@@ -36,6 +36,9 @@ commercial licences. So that both stay possible, by opening a pull request you a
 
 Your contribution is released to everyone under the AGPL v3.
 
+The full terms are in the [Contributor License Agreement](CLA.md). On your first pull request a bot asks you to sign it
+with one comment; the pull request can be merged once you have.
+
 ## Questions
 
 Open an issue on GitHub.
