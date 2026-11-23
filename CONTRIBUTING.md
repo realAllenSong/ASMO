@@ -24,10 +24,17 @@ Test against the test store (`--test`), not your real data.
 - Follow the existing code style (Swift, SwiftUI; comments say why, not what).
 - Include a short description of what the change does and why, and how you checked it.
 
-## License
+## License and contributor agreement
 
-By contributing you agree that your changes will be released under the same [MIT License](LICENSE) that covers the
-project. You retain copyright to your contribution.
+ASMO is offered under the [GNU AGPL v3](LICENSE) (with the attribution terms in [NOTICE](NOTICE)) and, separately, under
+commercial licences. So that both stay possible, by opening a pull request you agree that:
+
+- the contribution is your own original work, and you have the right to submit it;
+- you assign the copyright in your contribution to realAllenSong. Where an assignment is not possible, you grant
+  realAllenSong a perpetual, irrevocable, worldwide, royalty-free licence to use, modify, sublicense and relicense it,
+  including under commercial terms.
+
+Your contribution is released to everyone under the AGPL v3.
 
 ## Questions
 

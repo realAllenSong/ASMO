@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="AGPL-3.0 License" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%2015%2B-brightgreen" alt="Platform: macOS 15 or later" />
   <a href="https://github.com/realAllenSong/ASMO/releases/latest"><img src="https://img.shields.io/github/v/release/realAllenSong/ASMO?color=orange" alt="Latest release" /></a>
 </p>
@@ -191,7 +191,9 @@ The app is Swift, SwiftUI and SwiftData, with an AppKit text view for the day pa
 
 ## License
 
-[MIT](LICENSE).
+[GNU AGPL v3](LICENSE), with the attribution terms in [NOTICE](NOTICE). You can use, study, change and share ASMO. If you distribute it or a work based on it, or let people use it over a network, publish your source under the same licence and keep the credit "Based on ASMO by realAllenSong".
+
+**Commercial licence:** to use ASMO in a closed-source product or service, or on terms other than the AGPL, [contact us](mailto:song@entropinia.com).
 
 ## Acknowledgments
 
