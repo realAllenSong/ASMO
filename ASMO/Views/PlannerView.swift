@@ -1168,6 +1168,22 @@ struct PlannerView: View {
         closeDocument(to: PlanDate.from(next, calendar: clock.calendar))
     }
 
+    /// The Mac's document is showing this day (iPhone: never).
+    private func paperShows(_ key: String) -> Bool {
+        #if os(macOS)
+        macHome == "paper" && paperDays.contains { $0.key == key }
+        #else
+        false
+        #endif
+    }
+
+    /// The page of one day (including one made but not saved yet).
+    private func dayPage(_ key: String) -> DayPage? {
+        var descriptor = FetchDescriptor<DayPage>(predicate: #Predicate { $0.dayKey == key })
+        descriptor.fetchLimit = 1
+        return try? context.fetch(descriptor).first
+    }
+
     #if os(macOS)
     /// The day being written, as a page over the calendar.
     /// The days on the paper: today and the two weeks ahead, and every other day that has anything on it — items,
@@ -1272,12 +1288,6 @@ struct PlannerView: View {
         return pageDaysBox.days
     }
 
-    /// The page of one day (including one made but not saved yet).
-    private func dayPage(_ key: String) -> DayPage? {
-        var descriptor = FetchDescriptor<DayPage>(predicate: #Predicate { $0.dayKey == key })
-        descriptor.fetchLimit = 1
-        return try? context.fetch(descriptor).first
-    }
     @AppStorage("paperContents") private var paperContents = true
 
     /// The logo and 文档 | 日历: the same place in both views.
@@ -2885,7 +2895,7 @@ struct PlannerView: View {
             // An agent wrote on the page that is open: show it.
             if note.object == nil { pageRebuild += 1 }
             else if let key = note.object as? String,
-               documentDay?.key == key || editingDay?.key == key || (macHome == "paper" && paperDays.contains { $0.key == key }) {
+               documentDay?.key == key || editingDay?.key == key || paperShows(key) {
                 pageRebuild += 1
             }
         case .asmoDebugType:
@@ -2927,11 +2937,13 @@ struct PlannerView: View {
                     #endif
                     return
                 }
+                #if os(macOS)
                 if text.trimmed == "paper" { jump(to: clock.today); return }
                 // "paperday:2026-11-20": what a double-click on that day in the calendar does.
                 if text.hasPrefix("paperday:"), let day = JournalDays.date(forKey: String(text.dropFirst(9)).trimmed) {
                     jump(to: day); return
                 }
+                #endif
                 // "clock:86400": pretend it is that many seconds later (testing midnight); the day check follows.
                 #if DEBUG
                 if text.hasPrefix("clock:"), let seconds = TimeInterval(String(text.dropFirst(6)).trimmed) {
@@ -3462,7 +3474,11 @@ struct PlannerView: View {
                 if editingDay != nil, editingDay != day { instantly { editingDay = day; selected = day } }
                 #endif
             },
-            openNote: { url in openNote = url },
+            openNote: { url in
+                #if os(macOS)
+                openNote = url
+                #endif
+            },
             yearly: { title, day, kind in
                 let record = ImportantDateRecord(title: title, kind: kind,
                                                  rule: ImportantDateRule(month: day.month, day: day.day ?? 1, year: nil, system: .gregorian))
