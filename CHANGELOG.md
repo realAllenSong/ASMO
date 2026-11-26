@@ -2,6 +2,11 @@
 
 Every release of ASMO (逐日), newest first. Downloads are on [GitHub Releases](https://github.com/realAllenSong/ASMO/releases). 中文版：[CHANGELOG.zh.md](CHANGELOG.zh.md)
 
+## 2.8.1 · 2026-11-26
+
+- **Colours from the new icon:** vermilion for times, today and the main buttons, warm paper in the light look and warm ink in the dark look (no longer a violet grey). The 标紫 colour for words stays violet.
+- The website, guides and share card use the same colours.
+
 ## 2.8 · 2026-11-25
 
 **A new icon, and notes that read well**

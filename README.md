@@ -50,7 +50,7 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 
 ## What's new in 2.8
 
-- A new icon: a brush-stroke sun rising over a page.
+- A new icon: a brush-stroke sun rising over a page, and since 2.8.1 the colours follow it: vermilion for times, today and the main buttons, warm ink in the dark look.
 - Tables in notes are drawn as tables however wide they are, their cells wrapping to fit.
 - Double-click a picture, diagram, formula or table to view it large; right-click to copy, save, resize or edit its source.
 - The note's contents sit beside its text, and lists and tables inside callouts are drawn too.

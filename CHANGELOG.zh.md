@@ -2,6 +2,11 @@
 
 逐日（ASMO）的每个版本，新的在前。下载在 [GitHub Releases](https://github.com/realAllenSong/ASMO/releases)。English: [CHANGELOG.md](CHANGELOG.md)
 
+## 2.8.1 · 2026-11-26
+
+- **配色跟着新图标：** 时间、今天和主要按钮用朱红；浅色是暖纸色，深色是暖墨色（不再是偏紫的灰）。给文字标紫的颜色仍是紫色。
+- 网站、使用指南和分享卡片也换成了同一套颜色。
+
 ## 2.8 · 2026-11-25
 
 **新图标，笔记更好读**
