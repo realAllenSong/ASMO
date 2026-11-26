@@ -774,7 +774,7 @@ struct PageToolbar: View {
             divider
             tool("highlighter", "高亮 ==文字==", controller.highlight)
             colorDot(.systemRed, "标红")
-            colorDot(NSColor(theme.accent), "标紫")
+            colorDot(NSColor(theme.violet), "标紫")
             tool("eraser", "恢复默认颜色") { controller.color(nil) }
             divider
             tool("textformat.size.larger", "标题（留在页面上，不变成待办）", controller.toggleHeading)
@@ -880,7 +880,7 @@ struct SelectionBar: View {
             Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
             tool("highlighter", "高亮", controller.highlight)
             dot(.systemRed, "标红")
-            dot(NSColor(theme.accent), "标紫")
+            dot(NSColor(theme.violet), "标紫")
             tool("eraser", "恢复默认颜色") { controller.color(nil) }
             Rectangle().fill(theme.line).frame(width: 1, height: 16).padding(.horizontal, 4)
             tool("link", "链接 ⌘K", controller.link)

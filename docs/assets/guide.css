@@ -1,4 +1,4 @@
-:root{--bg:#F7F5F0;--card:#fff;--well:#EFECE5;--ink:#1F1D24;--ink2:#4E4A55;--ink3:#7B7682;--rule:rgba(31,29,36,0.12);--accent:#7A5CE0;--tint:#F6F2FE;--serif:Charter, "Iowan Old Style", Georgia, "Songti SC", "STSong", serif;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC","Segoe UI",system-ui,sans-serif;--mono:"SF Mono",ui-monospace,Menlo,monospace}
+:root{--bg:#F7F5F0;--card:#fff;--well:#EFECE5;--ink:#1F1C1A;--ink2:#4E4945;--ink3:#7B756E;--rule:rgba(31,28,26,0.12);--accent:#C63C1F;--tint:#FDF1EC;--serif:Charter, "Iowan Old Style", Georgia, "Songti SC", "STSong", serif;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC","Segoe UI",system-ui,sans-serif;--mono:"SF Mono",ui-monospace,Menlo,monospace}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.7 var(--sans)}
 a{color:var(--ink);text-decoration-color:var(--rule);text-underline-offset:3px}a:hover{text-decoration-color:var(--ink)}
