@@ -48,10 +48,6 @@ struct NotesSidebar: View {
                     homeRow
                     ForEach(rows, id: \.node.id) { row in
                         rowView(row.node, depth: row.depth)
-                        if !row.node.isFolder, !ExcalidrawFile.isDrawing(row.node.url.lastPathComponent),
-                           current?.standardizedFileURL == row.node.url.standardizedFileURL {
-                            headingRows(depth: row.depth + 1)
-                        }
                     }
                 }
                 .padding(.bottom, 16)
@@ -243,8 +239,82 @@ struct NoteScreen: View {
     let open: (URL) -> Void
 
     var body: some View {
-        NoteEditorView(url: url, theme: theme, library: library, outline: outline, controller: controller, open: open,
-                       header: AnyView(NoteTitle(url: url, theme: theme, library: library, open: open)))
+        GeometryReader { geometry in
+            // The note's contents sit in the margin left of the text, when the window leaves room for them.
+            let column = min(760, geometry.size.width - 96)
+            let margin = (geometry.size.width - column) / 2
+            NoteEditorView(url: url, theme: theme, library: library, outline: outline, controller: controller, open: open,
+                           header: AnyView(NoteTitle(url: url, theme: theme, library: library, open: open)))
+                .overlay(alignment: .topLeading) {
+                    if margin >= 190, outline.headings.count >= 2 {
+                        NoteContents(outline: outline, theme: theme)
+                            .frame(width: min(240, margin - 44), alignment: .leading)
+                            .padding(.leading, 24).padding(.top, 40)
+                            .frame(maxHeight: geometry.size.height - 20, alignment: .top)
+                    }
+                }
+        }
+    }
+}
+
+/// A note's headings beside its text: the top-level ones, and under the one being read its own subheadings (a long
+/// note stays a short list). The heading being read is marked; a click goes there.
+struct NoteContents: View {
+    @ObservedObject var outline: NoteOutline
+    let theme: PlannerTheme
+
+    var body: some View {
+        let headings = outline.headings
+        // The level the note is divided at: the highest one used more than once (a single "# 标题" above the
+        // sections repeats the note's name and is left out).
+        let counts = Dictionary(grouping: headings, by: \.level).mapValues(\.count)
+        let top = counts.keys.sorted().first { (counts[$0] ?? 0) >= 2 } ?? (headings.map(\.level).min() ?? 1)
+        // Each heading's top-level section (the last top-level heading at or before it).
+        var sections: [Int] = []
+        var section = -1
+        for (index, heading) in headings.enumerated() {
+            if heading.level <= top { section = index }
+            sections.append(section)
+        }
+        let open = outline.current.map { sections.indices.contains($0) ? sections[$0] : -1 } ?? -1
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("目录").font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.quiet).padding(.bottom, 8)
+            ScrollViewReader { reader in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(headings.enumerated()), id: \.offset) { index, heading in
+                            if heading.level == top || (heading.level > top && sections[index] == open) {
+                                row(heading, index: index, top: top)
+                            }
+                        }
+                    }
+                }
+                .scrollIndicators(.never)
+                .onChange(of: outline.current) { _, value in
+                    if let value { withAnimation(.easeOut(duration: 0.2)) { reader.scrollTo(value, anchor: .center) } }
+                }
+            }
+        }
+    }
+
+    private func row(_ heading: NoteMarkdown.Heading, index: Int, top: Int) -> some View {
+        let here = outline.current == index
+        let sub = heading.level > top
+        return Button { outline.go?(heading.range) } label: {
+            Text(heading.title)
+                .font(.system(size: sub ? 12 : 12.5, weight: here ? .semibold : (sub ? .regular : .medium)))
+                .foregroundStyle(here ? theme.accent : (sub ? theme.quiet : theme.ink.opacity(0.66)))
+                .lineLimit(2).multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 10 + CGFloat(min(heading.level - top, 2)) * 12).padding(.vertical, 4)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(here ? theme.accent : theme.line).frame(width: here ? 2 : 1)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(heading.title)
+        .id(index)
     }
 }
 

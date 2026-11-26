@@ -91,3 +91,14 @@ struct NoteBlocksTests {
         #expect(NoteMarkdown.codeTokens(python, hashComments: true).map(\.kind) == [.number, .comment])
     }
 }
+
+struct NoteQuoteTests {
+    @Test func nestedQuotesAndRows() {
+        let line = NoteMarkdown.lines("> > deep").first
+        #expect(line?.kind == .quote)
+        #expect(line?.marker?.length == 4)
+        #expect(NoteMarkdown.tableRow("> | a | b \\| c |") == ["a", "b | c"])
+        #expect(NoteMarkdown.unquoted("> - item").text == "- item")
+        #expect(NoteMarkdown.unquoted("> - item").prefix == 2)
+    }
+}

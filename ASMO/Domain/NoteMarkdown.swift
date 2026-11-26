@@ -144,7 +144,8 @@ public enum NoteMarkdown {
             line.kind = .rule
             return
         }
-        if let m = first(#"^\s*>[ \t]?"#, in: raw) {
+        // "> ", and "> > " for a quote inside a quote (the whole run of marks).
+        if let m = first(#"^\s*(?:>[ \t]?)+"#, in: raw) {
             line.kind = .quote
             line.marker = range(m.range)
             return
@@ -294,6 +295,20 @@ public enum NoteMarkdown {
         }
         _ = firstBar
         return (cells, bars)
+    }
+
+    /// A table row's words, cell by cell, as written (a quote's "> " in front is left out); "\\|" is a "|".
+    public static func tableRow(_ line: String) -> [String] {
+        var text = line
+        if let quote = text.range(of: #"^\s*(?:>[ \t]?)+"#, options: .regularExpression) { text.removeSubrange(quote) }
+        let ns = text as NSString
+        return tableCells(text).cells.map { ns.substring(with: $0).replacingOccurrences(of: "\\|", with: "|") }
+    }
+
+    /// The text of a quote's line without its "> " marks.
+    public static func unquoted(_ line: String) -> (prefix: Int, text: String) {
+        guard let quote = line.range(of: #"^\s*(?:>[ \t]?)+"#, options: .regularExpression) else { return (0, line) }
+        return (line.utf16.distance(from: line.startIndex, to: quote.upperBound), String(line[quote.upperBound...]))
     }
 
     // MARK: Callouts
