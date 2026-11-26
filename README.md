@@ -44,9 +44,18 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 </p>
 
 <p align="center">
-  <img src="assets/notes.png" width="800" alt="A note open in ASMO: the note's headings under it in the sidebar, a callout, a table drawn as a table, an inline formula and a formula block, and a mermaid diagram" />
+  <img src="assets/notes.png" width="800" alt="A note open in ASMO: its contents beside the text, a callout, a table drawn as a table, an inline formula and a formula block, and a mermaid diagram" />
   <br/><sub>A note: tables, callouts, formulas and diagrams drawn in place, all of it plain Markdown that Obsidian opens too.</sub>
 </p>
+
+## What's new in 2.8
+
+- A new icon: a brush-stroke sun rising over a page.
+- Tables in notes are drawn as tables however wide they are, their cells wrapping to fit.
+- Double-click a picture, diagram, formula or table to view it large; right-click to copy, save, resize or edit its source.
+- The note's contents sit beside its text, and lists and tables inside callouts are drawn too.
+
+2.7 joined the days and the notes (`#` in a line, `[[note]]` links). All changes: [CHANGELOG](CHANGELOG.md) · [Releases](https://github.com/realAllenSong/ASMO/releases)
 
 ## Features
 
