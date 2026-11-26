@@ -2,6 +2,11 @@
 
 Every release of ASMO (逐日), newest first. Downloads are on [GitHub Releases](https://github.com/realAllenSong/ASMO/releases). 中文版：[CHANGELOG.zh.md](CHANGELOG.zh.md)
 
+## 2.8.3 · 2026-11-26
+
+- **Click a picture to open it, as on a phone:** a picture, diagram or formula opens large over the window, the rest dimmed. Pinch or ⌘+ / ⌘− to zoom, drag to move, double-click to zoom in or back; the bar below copies, saves, opens it in Preview or edits its source. Click beside it or press Esc to close.
+- Diagrams in notes are drawn sharp at any zoom.
+
 ## 2.8.2 · 2026-11-26
 
 - **A bar over every picture, diagram, formula and table:** move the pointer onto one for buttons to view it large, copy it, edit its source, and the rest of its menu. A click on a picture, diagram or formula no longer turns it back into its source.

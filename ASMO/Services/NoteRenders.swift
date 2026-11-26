@@ -27,11 +27,16 @@ final class NoteRenders: NSObject, WKNavigationDelegate {
     /// A mermaid diagram (```mermaid).
     func mermaid(_ source: String) -> NSImage? {
         image("mermaid|" + source) {
-            let png = try await DiagramRenderer.shared.render(source)
-            guard let image = NSImage(data: png) else { throw PageMarkdown.Failure(message: "No picture.") }
-            // The PNG is drawn at twice the size: shown at its size in points.
-            if let rep = image.representations.first { image.size = NSSize(width: CGFloat(rep.pixelsWide) / 2, height: CGFloat(rep.pixelsHigh) / 2) }
-            return image
+            // Drawn from PDF on white: sharp however far it's zoomed in.
+            let pdf = try await DiagramRenderer.shared.pdf(source)
+            guard let page = NSPDFImageRep(data: pdf), page.bounds.width > 1 else { throw PageMarkdown.Failure(message: "No picture.") }
+            let size = page.bounds.size
+            return NSImage(size: size, flipped: false) { rect in
+                NSColor.white.setFill()
+                rect.fill()
+                page.draw(in: rect)
+                return true
+            }
         }
     }
 

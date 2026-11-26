@@ -172,6 +172,235 @@ private final class CenteringClipView: NSClipView {
     }
 }
 
+// MARK: Tapped open, in place
+
+/// A picture opened the way a phone opens one: over the window, the rest dimmed. Pinch or ⌘+ / ⌘− to zoom, drag
+/// to move, double-click to switch between fitting and close up; the bar below copies, saves, opens it in Preview or
+/// edits its source. A click beside the picture, or Esc, closes it.
+@MainActor
+final class PictureLightbox: NSView {
+    private let image: NSImage
+    private let file: URL?
+    private let title: String
+    private let edit: (() -> Void)?
+    private let scroll = NSScrollView()
+    private let picture = PanningImageView()
+    private weak var returnTo: NSResponder?
+    private var fitScale: CGFloat = 1
+
+    static func show(_ image: NSImage, title: String, file: URL?, in window: NSWindow?, from responder: NSResponder?, edit: (() -> Void)?) {
+        guard let content = window?.contentView, image.size.width > 0 else { return }
+        content.subviews.compactMap { $0 as? PictureLightbox }.forEach { $0.removeFromSuperview() }
+        let box = PictureLightbox(image: image, title: title, file: file, edit: edit)
+        box.returnTo = responder
+        box.frame = content.bounds
+        box.autoresizingMask = [.width, .height]
+        content.addSubview(box)
+        box.window?.makeFirstResponder(box)
+        box.layoutPicture()
+        // From the size it had on the page to the size that fits, the dimming fading in.
+        let start = box.scroll.magnification
+        box.alphaValue = 0
+        box.scroll.magnification = max(box.scroll.minMagnification, start * 0.85)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            box.animator().alphaValue = 1
+            box.scroll.animator().magnification = start
+        }
+    }
+
+    private init(image: NSImage, title: String, file: URL?, edit: (() -> Void)?) {
+        self.image = image
+        self.file = file
+        self.title = title
+        self.edit = edit
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.84).cgColor
+
+        picture.image = image
+        picture.imageScaling = .scaleProportionallyUpOrDown
+        picture.frame = NSRect(origin: .zero, size: image.size)
+        picture.toggle = { [weak self] in self?.toggleZoom() }
+        let clip = LightboxClipView()
+        clip.drawsBackground = false
+        clip.onBackground = { [weak self] in self?.close() }
+        scroll.contentView = clip
+        scroll.documentView = picture
+        scroll.drawsBackground = false
+        scroll.allowsMagnification = true
+        scroll.minMagnification = 0.05
+        scroll.maxMagnification = 16
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        addSubview(scroll)
+
+        let bar = NSVisualEffectView()
+        bar.material = .hudWindow
+        bar.blendingMode = .withinWindow
+        bar.state = .active
+        bar.appearance = NSAppearance(named: .darkAqua)
+        bar.wantsLayer = true
+        bar.layer?.cornerRadius = 12
+        func button(_ symbol: String, _ tip: String, _ action: Selector) -> NSButton {
+            let b = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tip) ?? NSImage(), target: self, action: action)
+            b.isBordered = false
+            b.contentTintColor = .white
+            b.toolTip = tip
+            b.setAccessibilityLabel(tip)
+            b.widthAnchor.constraint(equalToConstant: 34).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            return b
+        }
+        var buttons = [
+            button("minus.magnifyingglass", String(localized: "缩小 ⌘−"), #selector(zoomOut)),
+            button("arrow.up.left.and.arrow.down.right", String(localized: "适合屏幕 ⌘0"), #selector(fit)),
+            button("1.magnifyingglass", String(localized: "原始大小 ⌘1"), #selector(actualSize)),
+            button("plus.magnifyingglass", String(localized: "放大 ⌘+"), #selector(zoomIn)),
+            button("doc.on.doc", String(localized: "拷贝图片 ⌘C"), #selector(copyImage)),
+            button("square.and.arrow.down", String(localized: "存储为 PNG…"), #selector(saveImage)),
+        ]
+        if file != nil { buttons.append(button("eye", String(localized: "用「预览」打开"), #selector(openInPreview))) }
+        if edit != nil { buttons.append(button("chevron.left.forwardslash.chevron.right", String(localized: "编辑源码"), #selector(editSource))) }
+        let row = NSStackView(views: buttons)
+        row.spacing = 4
+        row.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 4, right: 10)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(row)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bar)
+        let close = button("xmark", String(localized: "关闭 Esc"), #selector(closeAction))
+        close.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(close)
+        let name = NSTextField(labelWithString: title)
+        name.textColor = NSColor.white.withAlphaComponent(0.8)
+        name.font = .systemFont(ofSize: 13, weight: .medium)
+        name.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(name)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: bar.leadingAnchor), row.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            row.topAnchor.constraint(equalTo: bar.topAnchor), row.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+            bar.centerXAnchor.constraint(equalTo: centerXAnchor), bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
+            close.topAnchor.constraint(equalTo: topAnchor, constant: 16), close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            name.centerYAnchor.constraint(equalTo: close.centerYAnchor), name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func layout() {
+        super.layout()
+        layoutPicture()
+    }
+
+    /// The picture fills the window above the bar; it opens fitted (a small one, like a formula, up to three
+    /// times its size).
+    func layoutPicture() {
+        let area = bounds.insetBy(dx: 24, dy: 0)
+        let frame = NSRect(x: area.minX, y: 76, width: area.width, height: max(100, bounds.height - 76 - 56))
+        guard scroll.frame != frame else { return }
+        let first = scroll.frame == .zero
+        scroll.frame = frame
+        fitScale = min(frame.width / image.size.width, frame.height / image.size.height) * 0.94
+        if first { scroll.magnification = min(fitScale, 3) }
+    }
+
+    // Anything on the page under it is out of reach while it's open.
+    override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) ?? self }
+    override func mouseDown(with event: NSEvent) { close() }
+    override func scrollWheel(with event: NSEvent) { scroll.scrollWheel(with: event) }
+
+    override func keyDown(with event: NSEvent) {
+        let command = event.modifierFlags.contains(.command)
+        switch (command, event.charactersIgnoringModifiers ?? "") {
+        case (true, "="), (true, "+"): zoomIn()
+        case (true, "-"): zoomOut()
+        case (true, "0"): fit()
+        case (true, "1"): actualSize()
+        case (true, "c"): copyImage()
+        case (false, "\u{1b}"), (false, " "): close()
+        default: super.keyDown(with: event)
+        }
+    }
+
+    override func cancelOperation(_ sender: Any?) { close() }
+
+    private func toggleZoom() {
+        let fitted = min(fitScale, 3)
+        scroll.animator().magnification = abs(scroll.magnification - fitted) < 0.05 ? max(fitted * 2.5, 1) : fitted
+    }
+
+    @objc private func zoomIn() { scroll.animator().magnification = min(scroll.maxMagnification, scroll.magnification * 1.25) }
+    @objc private func zoomOut() { scroll.animator().magnification = max(scroll.minMagnification, scroll.magnification / 1.25) }
+    @objc private func actualSize() { scroll.animator().magnification = 1 }
+    @objc private func fit() { scroll.animator().magnification = min(fitScale, 3) }
+    @objc private func copyImage() { PictureViewer.copy(image) }
+    @objc private func saveImage() { PictureViewer.save(image, suggested: title, from: window) }
+    @objc private func openInPreview() { if let file { PictureViewer.openInPreview(file) } }
+    @objc private func editSource() { let edit = edit; close(); edit?() }
+    @objc private func closeAction() { close() }
+
+    func close() {
+        let back = returnTo
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.14
+            animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.removeFromSuperview()
+                if let back = back as? NSView { back.window?.makeFirstResponder(back) }
+            }
+        })
+    }
+}
+
+/// The picture in the light box: dragged to move around it, double-clicked to zoom.
+private final class PanningImageView: NSImageView {
+    var toggle: (() -> Void)?
+    private var last: NSPoint?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { toggle?(); return }
+        last = event.locationInWindow
+        NSCursor.closedHand.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let last, let clip = enclosingScrollView?.contentView else { return }
+        let now = event.locationInWindow
+        let scale = enclosingScrollView?.magnification ?? 1
+        var origin = clip.bounds.origin
+        origin.x -= (now.x - last.x) / scale
+        origin.y -= (now.y - last.y) / scale * (isFlipped ? -1 : 1)
+        clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+        enclosingScrollView?.reflectScrolledClipView(clip)
+        self.last = now
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if last != nil { NSCursor.pop() }
+        last = nil
+    }
+}
+
+/// Keeps the picture centred; a click beside the picture closes the light box.
+private final class LightboxClipView: NSClipView {
+    var onBackground: (() -> Void)?
+
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        guard let document = documentView else { return rect }
+        if rect.width > document.frame.width { rect.origin.x = (document.frame.width - rect.width) / 2 }
+        if rect.height > document.frame.height { rect.origin.y = (document.frame.height - rect.height) / 2 }
+        return rect
+    }
+
+    override func mouseDown(with event: NSEvent) { onBackground?() }
+}
+
 // MARK: The bar over a picture
 
 import SwiftUI
@@ -310,8 +539,19 @@ extension NoteTextView {
     }
 
     @objc func viewPicture(_ sender: Any?) {
-        guard let picture = hit(sender) else { return }
-        PictureViewer.show(picture.image, title: viewerTitle(picture), file: picture.kind == "picture" ? picture.file : nil, over: window)
+        guard let key = (sender as? NSMenuItem)?.representedObject as? Int else { return }
+        openLightbox(key)
+    }
+
+    /// The picture opened in place, over the window (a click on a picture, diagram or formula).
+    func openLightbox(_ key: Int) {
+        guard let picture = drawn[key] else { return }
+        hideHoverBar()
+        let editable = ["math", "mermaid", "table"].contains(picture.kind) && picture.source != nil
+        PictureLightbox.show(picture.image, title: viewerTitle(picture), file: picture.kind == "picture" ? picture.file : nil,
+                             in: window, from: self, edit: editable ? { [weak self] in
+                                 let item = NSMenuItem(); item.representedObject = key; self?.editSource(item)
+                             } : nil)
     }
 
     @objc func copyPicture(_ sender: Any?) { if let picture = hit(sender) { PictureViewer.copy(picture.image) } }

@@ -14,6 +14,15 @@ final class DiagramRenderer: NSObject, WKNavigationDelegate {
 
     /// A PNG of the diagram, with its source kept inside. Throws mermaid's own message when the source is wrong.
     func render(_ source: String) async throws -> Data {
+        let pdf = try await pdf(source)
+        guard let png = PageMarkdown.diagram(pdf: pdf, source: source) else {
+            throw PageMarkdown.Failure(message: "The mermaid diagram could not be turned into a picture.")
+        }
+        return png
+    }
+
+    /// The diagram as PDF (sharp at any size: a note's diagram is zoomed in when opened).
+    func pdf(_ source: String) async throws -> Data {
         let web = try await page()
         let answer = try await web.callAsyncJavaScript("return await draw(source)", arguments: ["source": source],
                                                        in: nil, contentWorld: .page) as? [String: Any]
@@ -26,11 +35,7 @@ final class DiagramRenderer: NSObject, WKNavigationDelegate {
         web.frame = CGRect(x: 0, y: 0, width: max(width, 700), height: max(height, 400))
         let configuration = WKPDFConfiguration()
         configuration.rect = rect
-        let pdf = try await web.pdf(configuration: configuration)
-        guard let png = PageMarkdown.diagram(pdf: pdf, source: source) else {
-            throw PageMarkdown.Failure(message: "The mermaid diagram could not be turned into a picture.")
-        }
-        return png
+        return try await web.pdf(configuration: configuration)
     }
 
     private func page() async throws -> WKWebView {

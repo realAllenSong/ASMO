@@ -1503,16 +1503,15 @@ final class NoteTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         engaged = true
         let clicked = convert(event.locationInWindow, from: nil)
-        // A double-click on a picture, diagram, formula or table: shown large, to zoom and copy.
-        if event.clickCount == 2, let hit = picture(at: clicked), hit.picture.kind != "note" {
-            PictureViewer.show(hit.picture.image, title: viewerTitle(hit.picture), file: hit.picture.kind == "picture" ? hit.picture.file : nil, over: window)
+        // A click on a picture, a diagram or a formula opens it large, in place (the caret stays out of its source).
+        if let hit = picture(at: clicked), ["picture", "mermaid", "math"].contains(hit.picture.kind),
+           !(hoverBar?.frame.contains(clicked) ?? false) {
+            openLightbox(hit.key)
             return
         }
-        // A single click on a picture, a diagram or a formula leaves it as it is (the caret doesn't go into its
-        // source, which would show the source instead); the bar over it has what can be done.
-        if event.clickCount == 1, let hit = picture(at: clicked), ["picture", "mermaid", "math"].contains(hit.picture.kind) {
-            window?.makeFirstResponder(self)
-            showHoverBar(for: hit.key)
+        // A double-click on a table: the same (a single click writes in it).
+        if event.clickCount == 2, let hit = picture(at: clicked), hit.picture.kind == "table" {
+            openLightbox(hit.key)
             return
         }
         if let link = linkedPictures.first(where: { $0.value.contains(clicked) })?.key {
