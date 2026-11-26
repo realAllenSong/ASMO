@@ -172,6 +172,85 @@ private final class CenteringClipView: NSClipView {
     }
 }
 
+// MARK: The bar over a picture
+
+import SwiftUI
+
+/// Over the picture under the pointer: view it large, copy it, edit its source (diagrams, formulas, tables) and the
+/// rest of its menu.
+struct PictureHoverBar: View {
+    let editable: Bool
+    let dark: Bool
+    let action: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            button("arrow.up.left.and.arrow.down.right", String(localized: "查看大图（双击也可以）"), "view")
+            button("doc.on.doc", String(localized: "拷贝图片"), "copy")
+            if editable { button("chevron.left.forwardslash.chevron.right", String(localized: "编辑源码"), "edit") }
+            button("ellipsis", String(localized: "更多"), "more")
+        }
+        .padding(3)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.primary.opacity(0.12)))
+        .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+        .environment(\.colorScheme, dark ? .dark : .light)
+    }
+
+    private func button(_ symbol: String, _ help: String, _ name: String) -> some View {
+        Button { action(name) } label: {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                .frame(width: 28, height: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+extension NoteTextView {
+    func showHoverBar(for key: Int) {
+        guard let picture = drawn[key] else { hideHoverBar(); return }
+        hideHoverBar()
+        let editable = ["math", "mermaid", "table"].contains(picture.kind) && picture.source != nil
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let host = NSHostingView(rootView: PictureHoverBar(editable: editable, dark: dark) { [weak self] name in
+            self?.hoverAction(name, key: key)
+        })
+        let size = host.fittingSize
+        // Top right of the picture, inside it (small pictures: just above).
+        let rect = picture.rect
+        let y = rect.height > size.height + 20 ? rect.minY + 8 : rect.minY - size.height - 4
+        host.frame = NSRect(x: max(rect.minX, rect.maxX - size.width - 8), y: y, width: size.width, height: size.height)
+        addSubview(host)
+        hoverBar = host
+        hoverKey = key
+    }
+
+    func hideHoverBar() {
+        hoverBar?.removeFromSuperview()
+        hoverBar = nil
+        hoverKey = nil
+    }
+
+    private func hoverAction(_ name: String, key: Int) {
+        let item = NSMenuItem()
+        item.representedObject = key
+        switch name {
+        case "view": viewPicture(item)
+        case "copy": copyPicture(item)
+        case "edit": hideHoverBar(); editSource(item)
+        default:
+            guard let picture = drawn[key], let bar = hoverBar,
+                  let event = NSEvent.mouseEvent(with: .rightMouseDown, location: convert(NSPoint(x: picture.rect.midX, y: picture.rect.midY), to: nil),
+                                                 modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0, context: nil,
+                                                 eventNumber: 0, clickCount: 1, pressure: 1),
+                  let menu = menu(for: event) else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: bar.frame.maxX - 20, y: bar.frame.maxY + 2), in: self)
+        }
+    }
+}
+
 // MARK: The note's menu on a picture
 
 extension NoteTextView {

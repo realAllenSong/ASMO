@@ -917,6 +917,10 @@ struct PlannerView: View {
             let wins = NSApp.windows.filter(\.isVisible).map { "window: \($0.title) \(Int($0.frame.width))x\(Int($0.frame.height))" }
             try? (pics + wins).joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
             return
+        case "hoverpic":
+            guard let note = view as? NoteTextView else { return }
+            let keys = note.drawn.keys.sorted()
+            if let n = Int(rest), keys.indices.contains(n) { note.showHoverBar(for: keys[n]) }
         case "viewpic":
             guard let note = view as? NoteTextView else { return }
             let pics = note.drawn.sorted { $0.key < $1.key }

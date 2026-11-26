@@ -432,6 +432,7 @@ struct NoteEditorView: NSViewRepresentable {
             view?.linkedPictures = [:]
             view?.editablePictures = [:]
             view?.drawn = [:]
+            view?.hideHoverBar()
             styling = true
             storage.beginEditing()
             let lines = NoteMarkdown.lines(storage.string)
@@ -1310,6 +1311,35 @@ final class NoteTextView: NSTextView {
         var source: NSRange?
     }
 
+    /// The small bar over the picture under the pointer (view large, copy, edit the source, more).
+    var hoverBar: NSView?
+    var hoverKey: Int?
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        if let hit = picture(at: point), hit.picture.kind != "note" {
+            if hit.key != hoverKey { showHoverBar(for: hit.key) }
+        } else if let bar = hoverBar, !bar.frame.insetBy(dx: -6, dy: -6).contains(point) {
+            hideHoverBar()
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hideHoverBar()
+    }
+
     func picture(at point: NSPoint) -> (key: Int, picture: DrawnPicture)? {
         drawn.first { $0.value.rect.contains(point) }.map { ($0.key, $0.value) }
     }
@@ -1476,6 +1506,13 @@ final class NoteTextView: NSTextView {
         // A double-click on a picture, diagram, formula or table: shown large, to zoom and copy.
         if event.clickCount == 2, let hit = picture(at: clicked), hit.picture.kind != "note" {
             PictureViewer.show(hit.picture.image, title: viewerTitle(hit.picture), file: hit.picture.kind == "picture" ? hit.picture.file : nil, over: window)
+            return
+        }
+        // A single click on a picture, a diagram or a formula leaves it as it is (the caret doesn't go into its
+        // source, which would show the source instead); the bar over it has what can be done.
+        if event.clickCount == 1, let hit = picture(at: clicked), ["picture", "mermaid", "math"].contains(hit.picture.kind) {
+            window?.makeFirstResponder(self)
+            showHoverBar(for: hit.key)
             return
         }
         if let link = linkedPictures.first(where: { $0.value.contains(clicked) })?.key {

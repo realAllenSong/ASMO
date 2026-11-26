@@ -26,13 +26,13 @@ struct PlannerTheme {
     var surface: Color { color(0x2c2927, 0xefece6) }
     var ink: Color { color(0xf3efe9, 0x1f1c1a) }
     var quiet: Color { color(0xb6aea5, 0x8b857e) }
-    var accent: Color { color(0xf2876a, 0xc63c1f) }
-    var onAccent: Color { color(0x2a120c, 0xffffff) }
-    var wash: Color { color(0x47302a, 0xfbe9e3) }
+    var accent: Color { color(0xe5654a, 0xc63c1f) }
+    var onAccent: Color { color(0x24110c, 0xffffff) }
+    var wash: Color { color(0x45291f, 0xfbe9e3) }
     var line: Color { color(0x3c3835, 0xe5e1d9) }
     var field: Color { color(0x2b2826, 0xffffff) }
-    var block: Color { color(0x3d2c27, 0xfbede8) }
-    var blockEdge: Color { color(0xc98a78, 0xe0a593) }
+    var block: Color { color(0x3b2824, 0xfbede8) }
+    var blockEdge: Color { color(0xbf6f5c, 0xe0a593) }
     /// The 「标紫」 colour for words (kept violet now that the accent is vermilion).
     var violet: Color { color(0xc4b4ff, 0x7a5ce0) }
     var calendarEdge: Color { color(0x9a8c83, 0xb6aca4) }

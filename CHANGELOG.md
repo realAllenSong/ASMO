@@ -2,6 +2,11 @@
 
 Every release of ASMO (逐日), newest first. Downloads are on [GitHub Releases](https://github.com/realAllenSong/ASMO/releases). 中文版：[CHANGELOG.zh.md](CHANGELOG.zh.md)
 
+## 2.8.2 · 2026-11-26
+
+- **A bar over every picture, diagram, formula and table:** move the pointer onto one for buttons to view it large, copy it, edit its source, and the rest of its menu. A click on a picture, diagram or formula no longer turns it back into its source.
+- The dark look's vermilion is redder and calmer, closer to the icon.
+
 ## 2.8.1 · 2026-11-26
 
 - **Colours from the new icon:** vermilion for times, today and the main buttons, warm paper in the light look and warm ink in the dark look (no longer a violet grey). The 标紫 colour for words stays violet.
