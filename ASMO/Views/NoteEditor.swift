@@ -27,9 +27,14 @@ final class NoteImage: NSObject {
     var editAt: Int?
     /// How far in from the column's edge it's drawn (a table inside a callout).
     var indent: CGFloat = 0
+    /// What it is ("math", "mermaid", "table", "note", "drawing") and the source it stands for (for the menu).
+    var kind = ""
+    var source: NSRange?
 
     init(image: NSImage, size: NSSize, inline: Bool, centered: Bool = false, panel: Bool = false, link: String? = nil,
-         editAt: Int? = nil, indent: CGFloat = 0) {
+         editAt: Int? = nil, indent: CGFloat = 0, kind: String = "", source: NSRange? = nil) {
+        self.kind = kind
+        self.source = source
         self.image = image
         self.size = size
         self.inline = inline
@@ -426,6 +431,7 @@ struct NoteEditorView: NSViewRepresentable {
             guard let storage = view?.textStorage else { return }
             view?.linkedPictures = [:]
             view?.editablePictures = [:]
+            view?.drawn = [:]
             styling = true
             storage.beginEditing()
             let lines = NoteMarkdown.lines(storage.string)
@@ -479,7 +485,8 @@ struct NoteEditorView: NSViewRepresentable {
                     let style = paragraph(before: 4, after: size.height + 12)
                     style.lineSpacing = 0
                     storage.addAttributes([.paragraphStyle: style,
-                                           .noteImage: NoteImage(image: image, size: size, inline: false, centered: kind == "math", panel: kind == "mermaid")],
+                                           .noteImage: NoteImage(image: image, size: size, inline: false, centered: kind == "math", panel: kind == "mermaid",
+                                                                 kind: kind, source: range)],
                                           range: whole)
                 }
                 return
@@ -495,7 +502,8 @@ struct NoteEditorView: NSViewRepresentable {
                     let style = paragraph(before: 4, after: image.size.height + 12)
                     style.lineSpacing = 0
                     storage.addAttributes([.paragraphStyle: style,
-                                           .noteImage: NoteImage(image: image, size: image.size, inline: false, editAt: range.location, indent: indent)],
+                                           .noteImage: NoteImage(image: image, size: image.size, inline: false, editAt: range.location, indent: indent,
+                                                                 kind: "table", source: range)],
                                           range: whole)
                 }
                 return
@@ -894,7 +902,7 @@ struct NoteEditorView: NSViewRepresentable {
                     let size = fitted(image.size, maxHeight: 60)
                     hide(span.range, in: storage)
                     storage.addAttribute(.kern, value: size.width + 2, range: NSRange(location: NSMaxRange(span.range) - 1, length: 1))
-                    storage.addAttribute(.noteImage, value: NoteImage(image: image, size: size, inline: true), range: span.range)
+                    storage.addAttribute(.noteImage, value: NoteImage(image: image, size: size, inline: true, kind: "math", source: span.range), range: span.range)
                     if size.height > 20, let current = storage.attribute(.paragraphStyle, at: span.range.location, effectiveRange: nil) as? NSParagraphStyle {
                         let style = current.mutableCopy() as! NSMutableParagraphStyle
                         style.minimumLineHeight = max(style.minimumLineHeight, size.height + 2)
@@ -944,9 +952,10 @@ struct NoteEditorView: NSViewRepresentable {
                 storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
                 return
             }
-            func shown(_ image: NSImage, size: NSSize, link: String?) {
+            func shown(_ image: NSImage, size: NSSize, link: String?, kind: String) {
                 let style = paragraph(after: size.height + 14)
-                storage.addAttributes([.paragraphStyle: style, .noteImage: NoteImage(image: image, size: size, inline: false, link: link)],
+                storage.addAttributes([.paragraphStyle: style,
+                                       .noteImage: NoteImage(image: image, size: size, inline: false, link: link, kind: kind, source: line.range)],
                                       range: paragraphRange)
                 if showMarks { storage.addAttributes([.foregroundColor: quiet, .font: NSFont.systemFont(ofSize: 13)], range: line.range) }
                 else { hide(line.range, in: storage) }
@@ -956,7 +965,7 @@ struct NoteEditorView: NSViewRepresentable {
                 if file.lastPathComponent.lowercased().hasSuffix(".excalidraw.md") {
                     // A drawing: its picture, once made (a click opens it to draw).
                     if let image = DrawingPreviews.preview(file) {
-                        shown(image, size: fitted(image.size, maxHeight: 560), link: NotesLibrary.title(of: file))
+                        shown(image, size: fitted(image.size, maxHeight: 560), link: NotesLibrary.title(of: file), kind: "drawing")
                     } else {
                         storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
                     }
@@ -968,15 +977,21 @@ struct NoteEditorView: NSViewRepresentable {
                     section = String(raw[hash].dropFirst()).trimmingCharacters(in: .whitespaces)
                 }
                 let card = noteCard(file, section: section)
-                shown(card, size: card.size, link: NotesLibrary.title(of: file))
+                shown(card, size: card.size, link: NotesLibrary.title(of: file), kind: "note")
                 return
             }
-            guard let size = view?.pictureSize(file) else {
+            // "![[a.png|300]]" (or "![alt|300](a.png)"): shown 300 points wide, as Obsidian does.
+            let raw = string.substring(with: line.range)
+            let wanted = raw.range(of: #"\|\s*(\d{2,4})(?:x\d+)?\s*(?=\]\]|\])"#, options: .regularExpression)
+                .flatMap { Double(raw[$0].filter(\.isNumber).prefix(4)) }.map { CGFloat($0) }
+            guard let size = view?.pictureSize(file, width: wanted) else {
                 storage.addAttribute(.foregroundColor, value: quiet, range: line.range)
                 return
             }
             let style = paragraph(after: size.height + 14)
-            storage.addAttributes([.paragraphStyle: style, .noteDraw: "embed:" + file.path], range: paragraphRange)
+            storage.addAttributes([.paragraphStyle: style, .noteDraw: "embed:" + file.path,
+                                   .noteImage: NoteImage(image: NSImage(), size: size, inline: false, kind: "picture", source: line.range)],
+                                  range: paragraphRange)
             if showMarks {
                 storage.addAttributes([.foregroundColor: quiet, .font: NSFont.systemFont(ofSize: 13)], range: line.range)
             } else {
@@ -1263,16 +1278,16 @@ final class NoteTextView: NSTextView {
     }
 
     /// The size a picture is shown at: its own, no wider than the column, no taller than 520.
-    func pictureSize(_ file: URL) -> NSSize? {
+    func pictureSize(_ file: URL, width wanted: CGFloat? = nil) -> NSSize? {
         guard let image = picture(file) else { return nil }
-        let width = max(200, columnWidth - 4)
+        let width = min(wanted ?? .greatestFiniteMagnitude, max(200, columnWidth - 4))
         var size = image.size
         if size.width > width { size = NSSize(width: width, height: size.height * width / size.width) }
-        if size.height > 520 { size = NSSize(width: size.width * 520 / size.height, height: 520) }
+        if wanted == nil, size.height > 520 { size = NSSize(width: size.width * 520 / size.height, height: 520) }
         return size
     }
 
-    private func picture(_ file: URL) -> NSImage? {
+    func picture(_ file: URL) -> NSImage? {
         if let known = pictures[file.path] { return known }
         guard let image = NSImage(contentsOf: file), image.size.width > 0 else { return nil }
         pictures[file.path] = image
@@ -1283,6 +1298,21 @@ final class NoteTextView: NSTextView {
     var linkedPictures: [String: NSRect] = [:]
     /// Where pictures that stand for source (tables) were drawn, by where their source starts (a click writes it).
     var editablePictures: [Int: NSRect] = [:]
+    /// Every picture drawn (pictures, diagrams, formulas, tables, drawings), by where its text starts: what a
+    /// double-click opens and the menu acts on.
+    var drawn: [Int: DrawnPicture] = [:]
+
+    struct DrawnPicture {
+        var rect: NSRect
+        var image: NSImage
+        var file: URL?
+        var kind: String
+        var source: NSRange?
+    }
+
+    func picture(at point: NSPoint) -> (key: Int, picture: DrawnPicture)? {
+        drawn.first { $0.value.rect.contains(point) }.map { ($0.key, $0.value) }
+    }
 
     /// A callout's colour, by its kind (as Obsidian colours them).
     static func calloutColour(_ type: String) -> NSColor {
@@ -1390,8 +1420,11 @@ final class NoteTextView: NSTextView {
                 }
             case let value where value.hasPrefix("embed:"):
                 let file = URL(fileURLWithPath: String(value.dropFirst(6)))
-                guard let size = pictureSize(file), let image = picture(file) else { return }
+                guard let image = picture(file) else { return }
+                let size = (storage.attribute(.noteImage, at: range.location, effectiveRange: nil) as? NoteImage)?.size ?? pictureSize(file) ?? image.size
                 let frame = NSRect(x: left, y: used.maxY + 6, width: size.width, height: size.height)
+                drawn[range.location] = DrawnPicture(rect: frame, image: image, file: file, kind: "picture",
+                                                     source: (storage.attribute(.noteImage, at: range.location, effectiveRange: nil) as? NoteImage)?.source)
                 guard frame.intersects(rect) else { return }
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(roundedRect: frame, xRadius: 6, yRadius: 6).addClip()
@@ -1403,7 +1436,7 @@ final class NoteTextView: NSTextView {
         }
         // Formulas, diagrams, drawings and notes shown in the note.
         storage.enumerateAttribute(.noteImage, in: characters) { value, range, _ in
-            guard let picture = value as? NoteImage else { return }
+            guard let picture = value as? NoteImage, picture.kind != "picture" else { return }
             let glyphRange = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             guard glyphRange.length > 0 else { return }
             let used = layout.lineFragmentUsedRect(forGlyphAt: glyphRange.location, effectiveRange: nil).offsetBy(dx: origin.x, dy: origin.y)
@@ -1420,6 +1453,9 @@ final class NoteTextView: NSTextView {
             }
             if let link = picture.link { linkedPictures[link] = frame }
             if let at = picture.editAt { editablePictures[at] = frame }
+            drawn[range.location] = DrawnPicture(rect: frame, image: picture.image,
+                                                 file: picture.link.flatMap { coordinator?.library.note(named: $0) },
+                                                 kind: picture.kind, source: picture.source)
             guard frame.intersects(rect) else { return }
             NSGraphicsContext.saveGraphicsState()
             if picture.panel {
@@ -1437,6 +1473,11 @@ final class NoteTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         engaged = true
         let clicked = convert(event.locationInWindow, from: nil)
+        // A double-click on a picture, diagram, formula or table: shown large, to zoom and copy.
+        if event.clickCount == 2, let hit = picture(at: clicked), hit.picture.kind != "note" {
+            PictureViewer.show(hit.picture.image, title: viewerTitle(hit.picture), file: hit.picture.kind == "picture" ? hit.picture.file : nil, over: window)
+            return
+        }
         if let link = linkedPictures.first(where: { $0.value.contains(clicked) })?.key {
             coordinator?.openLink(link)
             return

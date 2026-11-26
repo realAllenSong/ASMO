@@ -910,6 +910,20 @@ struct PlannerView: View {
         (view as? NoteTextView)?.engaged = true
         switch verb {
         case "heading": pageController.noteHeading(Int(rest) ?? 0)
+        case "pics":
+            // The pictures drawn in the note, in order, and the windows open (for checking the viewer).
+            let note = view as? NoteTextView
+            let pics = (note?.drawn ?? [:]).sorted { $0.key < $1.key }.map { "\($0.value.kind) \(Int($0.value.rect.width))x\(Int($0.value.rect.height)) \($0.value.file?.lastPathComponent ?? "")" }
+            let wins = NSApp.windows.filter(\.isVisible).map { "window: \($0.title) \(Int($0.frame.width))x\(Int($0.frame.height))" }
+            try? (pics + wins).joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
+            return
+        case "viewpic":
+            guard let note = view as? NoteTextView else { return }
+            let pics = note.drawn.sorted { $0.key < $1.key }
+            if let n = Int(rest), pics.indices.contains(n) {
+                let pic = pics[n].value
+                PictureViewer.show(pic.image, title: note.viewerTitle(pic), file: pic.kind == "picture" ? pic.file : nil, over: note.window)
+            }
         case "hash":
             // The "#" menu's choices as shown, written to asmo-ed.txt.
             let items = (view as? DocTextView)?.hashModel.items ?? []
