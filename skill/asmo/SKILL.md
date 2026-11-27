@@ -153,6 +153,23 @@ asmo routine done 27f4 --day today                        # done | skip | clear,
 asmo routine stop 27f4                                    # ends it from today on
 ```
 
+## Questions for the user (yes/no, not to-dos)
+
+When your work needs the user's decision later ("keep this rule?", "publish this draft?"), don't put it on a day:
+ask in 逐日's question panel, a small window beside the planner where the user answers ✓ / ✗ when they look.
+
+```bash
+asmo ask "把周报改成每周五发？" --id myapp:weekly --from MyApp --why "上周你说周一太赶" \
+  --suggest yes --reason "周五有完整一周的数据" --tags 设置 --yes 改 --no 不改
+echo '[{"id":"myapp:a","title":"…","why":"…","suggest":"no","reason":"…"}]' | asmo ask --json --from MyApp
+asmo answers --from MyApp       # answered ones, oldest first: "answer" is yes or no
+asmo ask rm myapp:weekly        # after acting on the answer (or when it was settled some other way)
+asmo questions --from MyApp     # still waiting
+```
+
+Write the title, why and reason in the user's language, plainly; give your suggestion. Same id = the same question
+(updated in place). Read answers back, act on them, then `ask rm` them.
+
 ## Rules
 
 - `asmo undo` takes back the last change made with asmo (repeat for earlier ones), until the app is restarted.

@@ -67,6 +67,18 @@ Important dates (birthdays, anniversaries, holidays; every year)
                                      time it begins there (a China birthday on the 22nd: 11:00 on the 21st in New
                                      York), and is put in Apple Calendar at that moment with an alert.
 
+Questions for the person (yes/no; they wait in a small panel beside the planner, never on a day)
+  asmo ask TITLE [--id ID] [--from NAME] [--why TEXT] [--suggest yes|no] [--reason TEXT]
+           [--tags a,b] [--yes LABEL] [--no LABEL]
+                                     ask, or update the question with that id (answer kept unless it changed)
+  asmo ask --json [--from NAME]      many at once, JSON on stdin: [{"id","title","why","suggest","reason",
+                                       "tags":[…],"yes","no"}]
+  asmo questions [--from NAME] [--all]
+                                     the open ones (--all: answered ones too)
+  asmo answers [--from NAME]         answered ones, oldest first: "answer" is yes or no
+  asmo ask rm ID…                    let questions go (after reading their answers, or when settled elsewhere)
+  asmo answer ID yes|no|clear        answer as if clicked (tests, other front ends)
+
   asmo undo                          take back the last change made with asmo (repeat for earlier ones)
   asmo mirror [on|off]               keep Apple Calendar (timed items) and Reminders (day items) in step
                                      with 逐日 now, both ways (things added to the 逐日 list or calendar there
@@ -304,6 +316,24 @@ let tools: [Tool] = [
          required: ["note", "to"], request: passing("note-move")),
     Tool(name: "remove_note", about: "Move a note to the Trash.", properties: ["note": stringType], required: ["note"], request: passing("note-remove")),
     Tool(name: "undo", about: "Take back the last change made through these tools (call again for earlier ones).", properties: [:], request: passing("undo")),
+    Tool(name: "ask_user", about: "Leave yes/no questions for the user in 逐日's question panel (not a to-do). Say in `why` where it comes from and what changes, and give your suggestion with a reason; the user answers with ✓/✗ when they look. Read answers back with `answers`, then `remove_questions`. Asking again with the same id updates the question.",
+         properties: ["from": described("string", "Who asks, shown on the card (your app or agent's name)"),
+                      "questions": ["type": "array", "items": ["type": "object", "properties": [
+                        "id": described("string", "Your own stable key, e.g. \"myapp:item:42\""),
+                        "title": described("string", "The thing to decide, one plain sentence in the user's language"),
+                        "why": described("string", "Why it is asked: where it came from, what changes if yes"),
+                        "suggest": ["type": "string", "enum": ["yes", "no"]],
+                        "reason": described("string", "Why you suggest that"),
+                        "tags": ["type": "array", "items": stringType],
+                        "yes": described("string", "Label of the ✓ button (default 是)"),
+                        "no": described("string", "Label of the ✗ button (default 否)")], "required": ["title"]]]],
+         required: ["questions"], request: passing("ask")),
+    Tool(name: "answers", about: "Questions the user has answered (oldest first); each has answer yes or no.",
+         properties: ["from": described("string", "Only this asker's")], request: passing("answers")),
+    Tool(name: "open_questions", about: "Questions still waiting for the user.",
+         properties: ["from": described("string", "Only this asker's")], request: passing("questions")),
+    Tool(name: "remove_questions", about: "Let questions go: after reading their answers, or when they were settled some other way.",
+         properties: ["ids": ["type": "array", "items": stringType]], required: ["ids"], request: passing("ask-remove")),
 ]
 
 func runMCP() -> Never {
@@ -405,7 +435,7 @@ func setUp(skill: String?) -> Never {
 var arguments = Array(CommandLine.arguments.dropFirst())
 var flags: [String: String] = [:]
 var words: [String] = []
-let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--append", "--lunar", "--new"]
+let switches: Set<String> = ["--done", "--open", "--json", "--test", "--help", "--replace", "--append", "--lunar", "--new", "--all"]
 var index = 0
 while index < arguments.count {
     let argument = arguments[index]
@@ -561,6 +591,32 @@ do {
             put(["day": "day"])
         default: fail("asmo routine add|done|skip|clear|stop … See: asmo help")
         }
+    case "ask":
+        if rest.first == "rm" {
+            guard rest.count > 1 else { fail("asmo ask rm ID…") }
+            request = ["cmd": "ask-remove", "ids": Array(rest.dropFirst())]
+        } else if flags["--json"] != nil {
+            let input = FileHandle.standardInput.readDataToEndOfFile()
+            guard let parsed = try? JSONSerialization.jsonObject(with: input) else { fail("stdin is not JSON.") }
+            if let items = parsed as? [[String: Any]] { request = ["cmd": "ask", "questions": items] }
+            else if let one = parsed as? [String: Any] { request = ["cmd": "ask", "questions": [one]] }
+            else { fail("stdin has to be a JSON array of questions.") }
+            put(["from": "from"])
+        } else {
+            guard !rest.isEmpty else { fail("asmo ask TITLE [--suggest yes|no] [--why TEXT] … See: asmo help") }
+            request = ["cmd": "ask", "title": rest.joined(separator: " ")]
+            put(["id": "id", "from": "from", "why": "why", "suggest": "suggest", "reason": "reason", "tags": "tags",
+                 "yes": "yes", "no": "no"])
+        }
+    case "questions":
+        request = ["cmd": "questions", "all": flags["--all"] != nil]
+        put(["from": "from"])
+    case "answers":
+        request["cmd"] = "answers"
+        put(["from": "from"])
+    case "answer":
+        guard rest.count == 2 else { fail("asmo answer ID yes|no|clear") }
+        request = ["cmd": "answer", "id": rest[0], "answer": rest[1]]
     case "dates": request["cmd"] = "dates"
     case "date":
         switch rest.first {

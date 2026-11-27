@@ -178,6 +178,7 @@ final class AgentCommands {
         case "note-search": return try noteSearch(body)
         case "note-move": return try noteMove(body)
         case "note-remove": return try noteRemove(body)
+        case "ask", "questions", "answer", "answers", "ask-remove": return try questionCommand(command, body)
         case "mirror":
             // Keep Apple Calendar and Reminders in step now, and say what that did.
             if let on = body["on"] as? Bool { UserDefaults.standard.set(on, forKey: CalendarMirror.enabledKey) }
