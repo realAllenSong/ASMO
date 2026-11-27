@@ -2,7 +2,7 @@
 
 逐日（ASMO）的每个版本，新的在前。下载在 [GitHub Releases](https://github.com/realAllenSong/ASMO/releases)。English: [CHANGELOG.md](CHANGELOG.md)
 
-## 未发布
+## 2.9.1 · 2026-11-27
 
 - **agent 的问题，点 ✓ 或 ✗ 就回答。** 需要你拍板的事（要不要记住一条规则、要不要发布一份草稿）不再变成待办，而是作为卡片放进规划旁边的一个小窗口：要决定什么、为什么问、它建议怎么做。点 ✓ 或 ✗，或者「全部按建议」一次处理完；「撤销」可以收回回答。小窗口只在逐日在前台时出现，切走就隐藏；Dock 图标上的数字是还在等你的问题数，左边栏的按钮可以再打开它。agent 用 `asmo ask`（或 MCP 工具 `ask_user`）提问，用 `asmo answers` 读回你的回答。
 

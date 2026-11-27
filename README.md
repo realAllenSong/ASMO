@@ -50,6 +50,7 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
 
 ## What's new in 2.9
 
+- Since 2.9.1, an agent that needs your decision asks in a small window beside the planner; you answer with ✓ or ✗ (`asmo ask`, `asmo answers`, the `ask_user` MCP tool).
 - A welcome for new users: what 逐日 is, Calendar and Reminders (asked for with the reason, plus which of your calendars to show), where your notes live (your Obsidian vault as it is, found on the Desktop, in Documents or in iCloud), and birthdays.
 - Your own calendars show on their days, read only: holidays, flights, invitations.
 - 逐日 no longer opens a notes folder or asks for Calendar before you've said so.
