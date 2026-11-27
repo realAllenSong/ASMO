@@ -85,6 +85,8 @@ final class CalendarMirror {
         }
         do {
             summary = try await pass()
+        } catch is NotYet {
+            summary = ["state": "waiting for the welcome"]
         } catch {
             summary = ["state": "error", "error": error.localizedDescription, "while": stage]
         }
@@ -357,7 +359,14 @@ final class CalendarMirror {
 
     // MARK: EventKit
 
+    /// Thrown before a new user has been through the welcome: the mirror doesn't ask for Calendar on its own, the
+    /// welcome asks, saying why.
+    struct NotYet: Error {}
+
     private func authorize() async throws {
+        let undecided = EKEventStore.authorizationStatus(for: .event) == .notDetermined
+            || EKEventStore.authorizationStatus(for: .reminder) == .notDetermined
+        if undecided, !Onboarding.done { throw NotYet() }
         if EKEventStore.authorizationStatus(for: .event) != .fullAccess {
             guard try await store.requestFullAccessToEvents() else { throw Problem(message: "No access to Calendar.") }
         }

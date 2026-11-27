@@ -46,25 +46,48 @@ final class NotesLibrary: ObservableObject {
         }
     }
 
-    /// The folder chosen before; else an Obsidian vault on the Desktop or in Documents; else 逐日笔记 in Documents.
+    /// The folder chosen before. Someone new chooses one in the welcome (逐日 doesn't start reading or syncing a vault
+    /// nobody pointed it to); someone who used 逐日 before the welcome existed keeps the old guess: an Obsidian vault
+    /// on the Desktop or in Documents, else 逐日笔记 in Documents.
     private static func defaultRoot() -> URL? {
         // Testing (Debug, the test store) never touches the real notes: ASMO_TEST_NOTES names a copy.
         if let test = ProcessInfo.processInfo.environment["ASMO_TEST_NOTES"] { return URL(fileURLWithPath: test, isDirectory: true) }
         if let store = ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] {
+            if store == "fresh" { return nil }
             return AppPaths.support.appendingPathComponent(store == "demo" ? "notes-demo" : "notes-test", isDirectory: true)
         }
         if let path = UserDefaults.standard.string(forKey: folderKey), FileManager.default.fileExists(atPath: path) {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
+        guard Onboarding.done else { return nil }
+        return vaults().first ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/逐日笔记", isDirectory: true)
+    }
+
+    /// Obsidian vaults on this Mac: on the Desktop, in Documents (and one level below) and in Obsidian's iCloud folder.
+    nonisolated static func vaults() -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        for place in ["Desktop", "Documents"] {
-            let base = home.appendingPathComponent(place)
-            let children = (try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: nil)) ?? []
-            if let vault = children.first(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent(".obsidian").path) }) {
-                return vault
+        let places = ["Desktop", "Documents", "Library/Mobile Documents/iCloud~md~obsidian/Documents"].map { home.appendingPathComponent($0) }
+        var found: [URL] = []
+        func look(in folder: URL, depth: Int) {
+            let children = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+                                                                         options: [.skipsHiddenFiles])) ?? []
+            for child in children where (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                if FileManager.default.fileExists(atPath: child.appendingPathComponent(".obsidian").path) { found.append(child) }
+                else if depth > 0 { look(in: child, depth: depth - 1) }
             }
         }
-        return home.appendingPathComponent("Documents/逐日笔记", isDirectory: true)
+        for place in places { look(in: place, depth: place.lastPathComponent == "Desktop" ? 0 : 1) }
+        return found
+    }
+
+    /// How many notes a folder holds (counted up to `limit`).
+    nonisolated static func noteCount(in folder: URL, limit: Int = 2000) -> Int {
+        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return 0 }
+        var count = 0
+        while count < limit, let item = walker.nextObject() as? URL {
+            if item.pathExtension.lowercased() == "md" { count += 1 }
+        }
+        return count
     }
 
     func choose(_ folder: URL) {
@@ -466,6 +489,24 @@ final class NotesLibrary: ObservableObject {
 #endif
 
 #if os(macOS)
+/// Whether this Mac's user has been through the welcome. Someone who used 逐日 before it existed counts as having
+/// been (their Calendar copy, notes folder or notes are there already).
+enum Onboarding {
+    static var key: String { ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] == "fresh" ? "onboardingDone.fresh" : "onboardingDone" }
+
+    static var done: Bool {
+        let defaults = UserDefaults.standard
+        if let value = defaults.object(forKey: key) as? Bool { return value }
+        if let store = ProcessInfo.processInfo.environment["ASMO_TEST_STORE"] { return store != "fresh" }
+        let used = defaults.string(forKey: "appleMirror.calendar.main") != nil || defaults.string(forKey: NotesLibrary.folderKey) != nil
+            || defaults.string(forKey: "lastNote") != nil || FileManager.default.fileExists(atPath: AppPaths.support.appendingPathComponent("ASMO.store").path)
+        if used { defaults.set(true, forKey: key) }
+        return used
+    }
+
+    static func finish() { UserDefaults.standard.set(true, forKey: key) }
+}
+
 /// Keeps a notes folder that is a Git repository in step with its remote, as the Obsidian Git plugin did (the phone
 /// reads the notes through it): pulls on launch and every ten minutes, commits and pushes two minutes after 逐日
 /// last wrote a note, and on quitting. A pull that conflicts is undone and said, never left half-merged.

@@ -98,9 +98,22 @@ final class SystemPlanner {
         await refreshReminders()
     }
 
+    /// The calendar 逐日 keeps its own items in (written by the Calendar mirror): never read back as other events,
+    /// or every item would show twice.
+    nonisolated static var mirrorCalendarIDs: Set<String> {
+        Set(["appleMirror.calendar.main", "appleMirror.calendar.test"].compactMap { UserDefaults.standard.string(forKey: $0) })
+    }
+
+    nonisolated static func isMirrored(_ event: EKEvent) -> Bool {
+        if let calendar = event.calendar, mirrorCalendarIDs.contains(calendar.calendarIdentifier) { return true }
+        guard let url = event.url else { return false }
+        return url.scheme == "asmo" && url.host == "mirror"
+    }
+
     func refreshCalendars() {
         linkedLookup.removeAll()
-        calendars = canReadEvents ? store.calendars(for: .event).map {
+        let mirrored = Self.mirrorCalendarIDs
+        calendars = canReadEvents ? store.calendars(for: .event).filter { !mirrored.contains($0.calendarIdentifier) }.map {
             SystemCalendar(id: $0.calendarIdentifier, title: "\($0.title) · \($0.source.title)",
                            writable: $0.allowsContentModifications, suggestedImportant: suggestedImportant($0))
         }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } : []
@@ -159,7 +172,7 @@ final class SystemPlanner {
         guard !sources.isEmpty else { return [] }
         let predicate = store.predicateForEvents(withStart: start, end: lastDay.end, calendars: sources)
         return store.events(matching: predicate).filter {
-            visible.contains($0.calendar.calendarIdentifier) || Self.markerID($0) != nil
+            !isMirrored($0) && (visible.contains($0.calendar.calendarIdentifier) || Self.markerID($0) != nil)
         }.sorted { $0.startDate < $1.startDate }.map { Self.snapshot($0, important: important) }
     }
 

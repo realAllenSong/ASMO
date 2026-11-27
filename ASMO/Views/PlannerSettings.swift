@@ -5,6 +5,7 @@ struct PlannerSettings: View {
     @Bindable var system: SystemPlanner
     var openArchive: (() -> Void)? = nil
     var openImportant: (() -> Void)? = nil
+    var openOnboarding: (() -> Void)? = nil
     @Environment(\.closePlannerPanel) private var closePanel
     @Environment(\.colorScheme) private var scheme
     @AppStorage("voiceLocale") private var voiceLocale = "zh-Hans-CN"
@@ -23,6 +24,11 @@ struct PlannerSettings: View {
     var body: some View {
         PlannerPanel(title: String(localized: "设置"), width: 560, height: 560, close: close) {
             VStack(alignment: .leading, spacing: 17) {
+                if let openOnboarding {
+                    Button { openOnboarding() } label: {
+                        Label("新手引导：日历、笔记、生日一步步设置", systemImage: "sparkles")
+                    }.buttonStyle(PlannerActionStyle(theme: theme))
+                }
                 group("外观") {
                     HStack(spacing: 4) {
                         ForEach(DesktopAppearance.allCases, id: \.self) { option in

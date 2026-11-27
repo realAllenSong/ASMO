@@ -48,14 +48,13 @@ The `asmo` command is the other way in. Any agent that can run a shell command (
   <br/><sub>A note: tables, callouts, formulas and diagrams drawn in place, all of it plain Markdown that Obsidian opens too.</sub>
 </p>
 
-## What's new in 2.8
+## What's new in 2.9
 
-- A new icon: a brush-stroke sun rising over a page, and since 2.8.1 the colours follow it: vermilion for times, today and the main buttons, warm ink in the dark look.
-- Tables in notes are drawn as tables however wide they are, their cells wrapping to fit.
-- Click a picture, diagram or formula and it opens large over the window, as on a phone: pinch to zoom, drag, copy, save; right-click to resize or edit its source.
-- The note's contents sit beside its text, and lists and tables inside callouts are drawn too.
+- A welcome for new users: what 逐日 is, Calendar and Reminders (asked for with the reason, plus which of your calendars to show), where your notes live (your Obsidian vault as it is, found on the Desktop, in Documents or in iCloud), and birthdays.
+- Your own calendars show on their days, read only: holidays, flights, invitations.
+- 逐日 no longer opens a notes folder or asks for Calendar before you've said so.
 
-2.7 joined the days and the notes (`#` in a line, `[[note]]` links). All changes: [CHANGELOG](CHANGELOG.md) · [Releases](https://github.com/realAllenSong/ASMO/releases)
+2.8 brought the new icon and colours, tables that wrap, and pictures that open with a click. All changes: [CHANGELOG](CHANGELOG.md) · [Releases](https://github.com/realAllenSong/ASMO/releases)
 
 ## Features
 

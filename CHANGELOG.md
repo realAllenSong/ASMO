@@ -2,6 +2,12 @@
 
 Every release of ASMO (逐日), newest first. Downloads are on [GitHub Releases](https://github.com/realAllenSong/ASMO/releases). 中文版：[CHANGELOG.zh.md](CHANGELOG.zh.md)
 
+## 2.9 · 2026-11-26
+
+- **A welcome for new users**, once, and again from Settings: what 逐日 is; Calendar and Reminders, asked for with the reason, and which of your own calendars to show; where your notes live (an Obsidian vault found on the Desktop, in Documents or in Obsidian's iCloud folder, used as it is, another folder, or a new one); birthdays and anniversaries; the keys worth knowing.
+- **Your own calendars on their days**, read only: holidays, flights, invitations. 逐日's own calendar is never read back, so nothing shows twice.
+- 逐日 doesn't open a notes folder or ask for Calendar before you've chosen to; people who used it before carry on as they were.
+
 ## 2.8.3 · 2026-11-26
 
 - **Click a picture to open it, as on a phone:** a picture, diagram or formula opens large over the window, the rest dimmed. Pinch or ⌘+ / ⌘− to zoom, drag to move, double-click to zoom in or back; the bar below copies, saves, opens it in Preview or edits its source. Click beside it or press Esc to close.

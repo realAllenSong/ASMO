@@ -18,7 +18,7 @@ enum PlannerPage: String, CaseIterable {
 }
 
 private enum PlannerSheet: String, Identifiable {
-    case jump, archive, settings, editor, important, birthdayGreeting
+    case jump, archive, settings, editor, important, birthdayGreeting, onboarding
     case captureReview
     var id: Self { self }
 }
@@ -201,6 +201,9 @@ struct PlannerView: View {
     #if os(macOS)
     /// The note open on the page instead of the days (nil: the days).
     @State private var openNote: URL?
+    /// The welcome's step, and whether closing 重要日期 goes back to it.
+    @State private var onboardingStep = 0
+    @State private var resumeOnboarding = false
     @State private var findingNote = false
     @StateObject private var noteOutline = NoteOutline()
     @ObservedObject private var noteLibrary = NotesLibrary.shared
@@ -439,10 +442,17 @@ struct PlannerView: View {
                         #else
                         ArchiveView(archives: archives, localTasks: localItems, reminders: system.reminders, dayNotes: notes)
                         #endif
+                    case .onboarding:
+                        #if os(macOS)
+                        OnboardingView(system: system, library: noteLibrary,
+                                       openImportant: { resumeOnboarding = true; self.sheet = .important },
+                                       finish: { self.sheet = nil }, step: $onboardingStep)
+                        #endif
                     case .settings:
                         #if os(macOS)
                         PlannerSettings(system: system, openArchive: { self.sheet = .archive },
-                                        openImportant: { self.sheet = .important })
+                                        openImportant: { self.sheet = .important },
+                                        openOnboarding: { onboardingStep = 0; self.sheet = .onboarding })
                         #else
                         PlannerSettings(system: system)
                         #endif
@@ -458,6 +468,15 @@ struct PlannerView: View {
         if sheet == .archive { archiveSource = nil; archiveDay = nil; archiveUnplaced = false }
         #endif
         if sheet == .important { initialImportantDate = nil }
+        #if os(macOS)
+        // Birthdays added from the welcome: back to it, one step on.
+        if sheet == .important, resumeOnboarding {
+            resumeOnboarding = false
+            onboardingStep = 4
+            sheet = .onboarding
+            return
+        }
+        #endif
         if sheet == .birthdayGreeting { greetingDraft = nil }
         sheet = nil
         advanceReview()
@@ -873,6 +892,9 @@ struct PlannerView: View {
             sidebarMode = "days"
         } else if command.hasPrefix("find:") {
             noteOutline.find?(String(command.dropFirst(5)))
+        } else if command.hasPrefix("onboard:") {
+            onboardingStep = Int(command.dropFirst(8)) ?? 0
+            sheet = .onboarding
         } else if command == "home" {
             sidebarMode = "notes"
             openNote = nil
@@ -1432,6 +1454,17 @@ struct PlannerView: View {
                     .background(theme.sheet)
                 }
             }
+        }
+        // Someone new: the welcome, once.
+        .task {
+            if !Onboarding.done, sheet == nil { onboardingStep = 0; sheet = .onboarding }
+        }
+        // Events in the person's own calendars (holidays, flights, invitations), on their days, read only.
+        .task(id: AgendaCalendarRequest(first: paperDays.first, last: paperDays.last, timeZone: clock.calendar.timeZone,
+                                        revision: system.calendarRevision, linkedAnchors: [:])) {
+            if system.calendars.isEmpty, system.canReadEvents { system.refreshCalendars() }
+            let result = await system.agendaEvents(on: paperDays, calendar: clock.calendar, linkedAnchors: [:])
+            if !Task.isCancelled { journalEvents = result }
         }
         // A note opened from anywhere (⌘P, a link, an agent) brings the notes into the sidebar.
         .onChange(of: openNote) { _, note in

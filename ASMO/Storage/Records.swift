@@ -251,6 +251,7 @@ enum ASMOStore {
         case "1": name = "ASMO-Test"
         case "demo": name = "ASMO-Demo"
         case "sync": name = "ASMO-Sync"     // an empty store for checking what iCloud brings down
+        case "fresh": name = "ASMO-Fresh"   // a first launch: nothing written yet (the onboarding is tried on it)
         default: break
         }
         #endif
