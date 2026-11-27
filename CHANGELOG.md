@@ -2,6 +2,10 @@
 
 Every release of ASMO (逐日), newest first. Downloads are on [GitHub Releases](https://github.com/realAllenSong/ASMO/releases). 中文版：[CHANGELOG.zh.md](CHANGELOG.zh.md)
 
+## Unreleased
+
+- **Questions from your agents, answered with ✓ or ✗.** When an agent needs your decision (a rule it wants to remember, a draft to publish), it leaves a card in a small window beside the planner instead of a to-do: what to decide, why it asks, and what it suggests. Click ✓ or ✗, or 全部按建议 to take every suggestion; 撤销 takes an answer back. The window shows while 逐日 is in front and hides with it; the Dock icon counts what waits, and the rail button opens it again. Agents ask with `asmo ask` (or the `ask_user` MCP tool) and read your answers with `asmo answers`.
+
 ## 2.9 · 2026-11-26
 
 - **A welcome for new users**, once, and again from Settings: what 逐日 is; Calendar and Reminders, asked for with the reason, and which of your own calendars to show; where your notes live (an Obsidian vault found on the Desktop, in Documents or in Obsidian's iCloud folder, used as it is, another folder, or a new one); birthdays and anniversaries; the keys worth knowing.

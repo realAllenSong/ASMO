@@ -25,6 +25,10 @@ final class DesktopDelegate: NSObject, NSApplicationDelegate {
         if let window = NSApp.mainWindow {
             rememberWindow(Notification(name: NSWindow.didBecomeMainNotification, object: window))
         }
+        // Agents' questions (asmo ask): their panel comes up beside the planner once its window is there.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            MainActor.assumeIsolated { QuestionsPanel.shared.start() }
+        }
     }
 
     @objc private func rememberWindow(_ notification: Notification) {
@@ -85,6 +89,15 @@ final class DesktopDelegate: NSObject, NSApplicationDelegate {
             if FileManager.default.fileExists(atPath: dump.path) {
                 try? FileManager.default.removeItem(at: dump)
                 DispatchQueue.main.async { NotificationCenter.default.post(name: .asmoDebugDump, object: folder.appendingPathComponent("asmo-dump.txt")) }
+            }
+            let questions = folder.appendingPathComponent("asmo-questions.request")
+            if let look = try? String(contentsOf: questions, encoding: .utf8) {
+                try? FileManager.default.removeItem(at: questions)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        QuestionsPanel.shared.snapshot(to: folder.appendingPathComponent("asmo-questions.png"), dark: look.contains("dark"))
+                    }
+                }
             }
             let request = folder.appendingPathComponent("asmo-snapshot.request")
             guard FileManager.default.fileExists(atPath: request.path) else { return }

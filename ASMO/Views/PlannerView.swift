@@ -1552,6 +1552,15 @@ struct PlannerView: View {
             railButton("calendar", label: "日程", shortcut: "1", selected: sidebarMode == "days") { showDays() }
             railButton("doc.text", label: "笔记", shortcut: "2", selected: sidebarMode == "notes") { showNotes() }
             railButton("magnifyingglass", label: "搜索笔记和日程 ⌘P", shortcut: nil, selected: false) { findingNote = true }
+            if !QuestionDesk.shared.open.isEmpty {
+                // Agents' questions wait: the count, and a click brings their panel back.
+                railButton("checklist", label: "待你确认", shortcut: nil, selected: false) { QuestionsPanel.shared.show() }
+                    .overlay(alignment: .topTrailing) {
+                        Text("\(QuestionDesk.shared.open.count)").font(.system(size: 9, weight: .bold)).foregroundStyle(theme.onAccent)
+                            .padding(.horizontal, 4).frame(minWidth: 15, minHeight: 15).background(theme.accent, in: Capsule())
+                            .offset(x: 3, y: -2).allowsHitTesting(false)
+                    }
+            }
             Spacer()
             railButton("gearshape", label: "设置", shortcut: nil, selected: false) { sheet = .settings }
         }
