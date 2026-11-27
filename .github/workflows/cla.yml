@@ -29,4 +29,5 @@ jobs:
           path-to-signatures: 'signatures/cla.json'
           path-to-document: 'https://github.com/realAllenSong/ASMO/blob/main/CLA.md'
           branch: 'cla-signatures'
-          allowlist: 'realAllenSong,dependabot[bot],github-actions[bot]'
+          # Claude is named as a co-author on the maintainer's own commits (Co-Authored-By): not a contributor to sign.
+          allowlist: 'realAllenSong,Claude*,dependabot[bot],github-actions[bot]'
